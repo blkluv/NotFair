@@ -19,7 +19,7 @@ This code ships to real users. Sycophancy and rubber-stamping cost us credibilit
 - Home of the `toprank` plugin — the public artifact customers install.
 - Contains skills under `google-ads/`, `seo/`, `gemini/`, and `toprank-upgrade-skill/`.
 - Registered via `.claude-plugin/plugin.json` (skills list) and `.claude-plugin/marketplace.json` (plugin metadata).
-- Paired with the AdsAgent MCP server (`https://www.adsagent.org`) for Google Ads write operations, and with Google Search Console for SEO reads.
+- Paired with the NotFair MCP server (`https://notfair.co/api/mcp`, OAuth, formerly hosted at adsagent.org) for Google Ads write operations, and with Google Search Console for SEO reads.
 
 ## Critical: this ships to users
 

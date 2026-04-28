@@ -151,8 +151,10 @@ assert_file "$REPO_ROOT/seo/shared/preamble.md" "SEO shared preamble exists"
 for skill in ads ads-audit ads-copy; do
   assert_contains "$REPO_ROOT/google-ads/$skill/SKILL.md" "../shared/preamble.md" \
     "$skill references shared preamble"
+  assert_not_contains "$REPO_ROOT/google-ads/$skill/SKILL.md" "mcp__notfair__listConnectedAccounts" \
+    "$skill does not inline MCP detection (notfair prefix)"
   assert_not_contains "$REPO_ROOT/google-ads/$skill/SKILL.md" "mcp__adsagent__listConnectedAccounts" \
-    "$skill does not inline MCP detection"
+    "$skill does not inline MCP detection (legacy adsagent prefix)"
 done
 
 # SEO skills that need GSC reference the shared preamble
@@ -166,9 +168,9 @@ done
 echo ""
 echo "=== 5. MCP server config ==="
 
-assert_contains "$REPO_ROOT/.mcp.json" "adsagent" ".mcp.json has adsagent server"
-assert_contains "$REPO_ROOT/.mcp.json" "mcp-remote" ".mcp.json uses mcp-remote"
-assert_contains "$REPO_ROOT/.mcp.json" "ADSAGENT_API_KEY" ".mcp.json references API key env var"
+assert_contains "$REPO_ROOT/.mcp.json" "\"notfair\"" ".mcp.json registers the notfair server (tool prefix mcp__notfair__*)"
+assert_contains "$REPO_ROOT/.mcp.json" "\"type\": \"http\"" ".mcp.json uses native HTTP transport (no mcp-remote bridge)"
+assert_contains "$REPO_ROOT/.mcp.json" "notfair.co/api/mcp" ".mcp.json points at NotFair MCP endpoint"
 
 # ─── Test 6: Connectors section in README ─────────────────────
 

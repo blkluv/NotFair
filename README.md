@@ -127,7 +127,7 @@ Run these two commands in Claude Code:
 
 That's it. All skills are now available as `/toprank:*` commands.
 
-**Google Ads (optional):** Connect your account at [adsagent.org](https://www.adsagent.org) (free API key) — setup instructions are provided there.
+**Google Ads (optional):** The first time Claude Code connects to the NotFair MCP server, it opens a browser tab and asks you to sign in to [notfair.co](https://notfair.co) — authorize once and the token is stored in your OS keychain. No API key to copy, no `mcp-remote` bridge to install.
 
 ### Manual Install
 
@@ -227,9 +227,9 @@ toprank/
 
 The Google Ads surface is also available as a standalone remote MCP server — use it from any MCP client (Claude Desktop, Cursor, Inspector, your own agent) without installing the Toprank CLI plugin.
 
-- **Registry name:** `io.github.nowork-studio/adsagent` (verify: `curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=adsagent"`)
-- **Endpoint:** `https://adsagent.org/api/mcp` (streamable HTTP)
-- **Auth:** OAuth (Claude Connector) or Bearer token — get one at [adsagent.org/connect](https://adsagent.org/connect)
+- **Registry name:** `io.github.nowork-studio/notfair` (verify: `curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=notfair"`)
+- **Endpoint:** `https://notfair.co/api/mcp` (streamable HTTP)
+- **Auth:** OAuth 2.1 with dynamic client registration — your MCP client opens a browser tab to sign in at [notfair.co](https://notfair.co) on first use; the token is stored locally (OS keychain in Claude Code)
 
 The server exposes ~100 Google Ads tools across reads (performance, search terms, impression share, keyword ideas, GAQL), writes (pause/enable, bid and budget updates, keyword and negative list management, campaign creation), and a `runScript` tool that fans out up to 20 GAQL queries in parallel for open-ended analytical questions. Source for the hosted server lives in [`nowork-studio/ads-agent`](https://github.com/nowork-studio/ads-agent).
 
@@ -241,14 +241,14 @@ Toprank skills reference external tools using the `~~category` placeholder patte
 
 | Category | Placeholder | Default Server | Alternatives |
 |----------|-------------|---------------|--------------|
-| Google Ads | `~~google-ads` | [AdsAgent MCP](https://www.adsagent.org) (`mcp__adsagent__*`) | Google Ads MCP (`mcp__google_ads_mcp__*`) |
+| Google Ads | `~~google-ads` | [NotFair MCP](https://notfair.co) (`mcp__notfair__*`; legacy `mcp__adsagent__*` still detected during the rename window) | Google Ads MCP (`mcp__google_ads_mcp__*`) |
 | Search Console | `~~search-console` | gcloud CLI + Search Console API | Any GSC-compatible MCP server |
 | CMS | `~~cms` | Direct API (WordPress REST, Strapi, Contentful, Ghost) | Any CMS MCP server |
 
 Skills use conditional blocks based on available tools. If a connector is not available, the skill gracefully degrades — for example, `seo-analysis` can still run a technical crawl without GSC data.
 
 **Setup:**
-- **Google Ads:** See `google-ads/shared/preamble.md`. Get a free API key from [adsagent.org](https://www.adsagent.org), set `ADSAGENT_API_KEY`, and the `.mcp.json` auto-configures the MCP server.
+- **Google Ads:** See `google-ads/shared/preamble.md`. The `.mcp.json` registers `https://notfair.co/api/mcp` as a native HTTP MCP server; on first connection Claude Code opens a browser for OAuth sign-in to [notfair.co](https://notfair.co) and stores the token in your OS keychain — no environment variable, no bridge subprocess.
 - **Search Console:** See `seo/shared/preamble.md`. Requires Google Cloud SDK, Search Console API enabled, and OAuth login.
 - **CMS:** Run `/toprank:setup-cms` to configure WordPress, Strapi, Contentful, or Ghost.
 

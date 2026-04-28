@@ -6,6 +6,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.15.0] — 2026-04-28
+
+### Changed
+- **MCP server moved from AdsAgent to NotFair** — endpoint migrated from `https://adsagent.org/api/mcp` to `https://notfair.co/api/mcp`. The plugin's `.mcp.json` is updated automatically when you upgrade; restart Claude Code to pick up the new server.
+- **Auth scheme switched from API key to native OAuth 2.1** — `ADSAGENT_API_KEY` is no longer required, and the `mcp-remote` (npx) bridge has been removed. `.mcp.json` now uses Claude Code's native HTTP transport (`"type": "http"`); on first connection Claude Code opens a browser tab for OAuth sign-in to NotFair and stores the token in your OS keychain. You can remove `ADSAGENT_API_KEY` from `~/.claude/settings.json` once the new server is connected.
+- **Local namespace renamed `.adsagent` → `.notfair`** — affects the global config dir (`~/.adsagent/` → `~/.notfair/`), the project config file (`.adsagent.json` → `.notfair.json`), and the project data dir (`.adsagent/` → `.notfair/`). The shared preamble runs a one-time atomic `mv` migration on first invocation; if both old and new paths exist (partial state from a manual move), it stops and asks you to reconcile rather than risk losing writes. **Update your `.gitignore` if you were ignoring `.adsagent.json` / `.adsagent/`.**
+- **Tool prefix renamed `mcp__adsagent__*` → `mcp__notfair__*`** — driven by the `.mcp.json` server-name change. The shared preamble's MCP detection prefers the new prefix but still detects the legacy one (and the legacy `mcp__claude_ai_AdsAgent__*` connector) so skills keep working through the rename window. If you're on a session that hasn't restarted yet, the preamble nudges you to restart Claude Code once.
+- **MCP registry identifier renamed `io.github.nowork-studio/adsagent` → `io.github.nowork-studio/notfair`** — for users who consume the standalone MCP server directly (Claude Desktop, Cursor, Inspector, custom agents). Bumped the published server version to 0.3.0 to reflect the rename.
+
+### Migration notes
+- The shared preamble handles `.adsagent` → `.notfair` filesystem migration automatically — no manual steps for global users.
+- Users who ran "save this account for this project only" will have their project-level config (`.adsagent.json` and the `.adsagent/` data dir) renamed in place on next skill invocation.
+- OAuth tokens are stored in the OS keychain (Keychain on macOS, Credential Manager on Windows, Secret Service on Linux). On first connection to the new endpoint you'll see a browser tab for sign-in; tokens refresh automatically afterwards.
+
+---
+
 ## [0.14.0] — 2026-04-27
 
 ### Added

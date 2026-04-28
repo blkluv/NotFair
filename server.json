@@ -1,18 +1,18 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.nowork-studio/adsagent",
-  "title": "AdsAgent",
-  "description": "Google Ads analysis and operations — read performance, manage keywords, bids, and campaigns.",
-  "websiteUrl": "https://adsagent.org",
+  "name": "io.github.nowork-studio/notfair",
+  "title": "NotFair",
+  "description": "Google Ads MCP - analyze performance, manage keywords, bids, and campaigns.",
+  "websiteUrl": "https://notfair.co",
   "repository": {
     "url": "https://github.com/nowork-studio/toprank",
     "source": "github"
   },
-  "version": "0.2.23",
+  "version": "0.3.0",
   "remotes": [
     {
       "type": "streamable-http",
-      "url": "https://adsagent.org/api/mcp"
+      "url": "https://notfair.co/api/mcp"
     }
   ]
 }
