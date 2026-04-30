@@ -1,4 +1,5 @@
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -152,6 +153,63 @@ class WeeklyReviewScoringTest(unittest.TestCase):
         self.assertEqual(issue["recommended_action_type"], "query_intent_mapping")
         self.assertIn("business_intent_score", issue["score_components"])
         self.assertTrue(any("concrete page" in note for note in issue["operator_judgment_notes"]))
+
+    def test_action_proposal_includes_deep_dive_diagnostics_before_approval(self) -> None:
+        analysis = self.base_analysis()
+        analysis["ctr_gaps_by_page"] = [
+            {
+                "query": "how much does it cost to board a dog",
+                "page": "https://www.example.com/blog/dog-boarding-cost",
+                "clicks": 2,
+                "impressions": 1681,
+                "ctr": 0.12,
+                "position": 2.8,
+            }
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "content" / "blogs"
+            source.mkdir(parents=True)
+            (source / "dog-boarding-cost.mdx").write_text(
+                "---\n"
+                "title: \"Dog Boarding Cost in 2026\"\n"
+                "description: \"Compare dog boarding prices and hidden fees.\"\n"
+                "---\n\n"
+                "# Dog Boarding Cost in 2026\n\n"
+                "This guide explains fees first. Book a boarding visit when ready.\n\n"
+                "Prices are $55-$90 per night in Seattle.\n",
+                encoding="utf-8",
+            )
+            original = weekly_review.serp_snapshot_for_query
+            weekly_review.serp_snapshot_for_query = lambda query, site_id, live=False: {
+                "source": "test_serp",
+                "status": "ok",
+                "query": query,
+                "results": [{"title": "Dog Boarding Cost", "domain": "example.com", "snippet": "$55-$90 per night"}],
+                "answer_like_serp": True,
+            }
+            try:
+                payload = weekly_review.build_payload(
+                    "example.com",
+                    analysis,
+                    {"priors": {}},
+                    None,
+                    site_profile={"source_roots": [str(root)]},
+                    live_diagnostics=True,
+                )
+            finally:
+                weekly_review.serp_snapshot_for_query = original
+
+        proposal = next(item for item in payload["queue_items"] if item["type"] == "action_proposal")
+        deep_dive = proposal["deep_dive"]
+        self.assertEqual(deep_dive["status"], "completed")
+        self.assertTrue(deep_dive["checks"]["serp_inspected"])
+        self.assertTrue(deep_dive["checks"]["current_snippet_inspected"])
+        self.assertTrue(deep_dive["checks"]["above_the_fold_inspected"])
+        self.assertTrue(deep_dive["checks"]["zero_click_risk_accounted_for"])
+        self.assertEqual(deep_dive["current_snippet"]["title"], "Dog Boarding Cost in 2026")
+        self.assertTrue(deep_dive["above_the_fold"]["has_fast_price_answer_above_fold"])
+        self.assertIn("complete_business_context", proposal["approval_preconditions"])
 
     def test_action_proposal_surfaces_business_context_gaps(self) -> None:
         analysis = self.base_analysis()

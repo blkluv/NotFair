@@ -16,9 +16,9 @@ metadata: { "openclaw": { "emoji": "📈", "homepage": "https://github.com/nowor
    - `python3 {baseDir}/../../bin/weekly_review.py <site_id-or-url>`
    - add `--gsc-property` if the site profile does not already contain one
    - add `--analysis-file` when testing against a saved GSC analysis JSON fixture
-8. The runner will generate and persist the review artifacts automatically.
-9. Verify that the run wrote `audit.json`, `action-plan.json`, and `verification.json`, refreshed `latest-state.json`, and created a follow-up queue item.
-10. If the next action requires editing a site repo, CMS, publishing content, or opening a PR, stop and ask for approval before doing it.
+8. The runner will generate and persist the review artifacts automatically, including automatic deep-dive diagnostics for the top CTR/snippet/content opportunity when applicable.
+9. Verify that the run wrote `audit.json`, `action-plan.json`, and `verification.json`, refreshed `latest-state.json`, and created queue items. The top proposal should include `deep_dive` with SERP, current snippet, above-the-fold, and zero-click checks before approval.
+10. If the next action requires editing a site repo, CMS, publishing content, or opening a PR, stop and ask for approval before doing it. Missing business context blocks approval/editing, not investigation.
 
 ## Wrapper job
 

@@ -37,7 +37,8 @@ These are not hard approval rules. They are decision levers for the operator and
 - Let high-impression, high-position, low-CTR opportunities outrank low-volume noisy regressions only when business intent and actionability are also strong.
 - For informational price queries, classify the action as snippet/content packaging or query-intent mapping unless a SERP diagnosis proves metadata is the main lever.
 - Explain why the top action is actionable and what would make it unsafe or low-confidence.
-- If business-impact context is incomplete, create an explicit `business_context_request` queue item and surface the questions in the runner result instead of burying them in verification warnings.
+- Before proposing an edit for CTR/snippet/content opportunities, automatically run a deep-dive diagnostic: SERP snapshot, current title/meta/H1, above-the-fold content packaging, CTA/price-answer check, and zero-click risk classification.
+- If business-impact context is incomplete, create an explicit `business_context_request` queue item and surface the questions in the runner result instead of burying them in verification warnings. Missing business context blocks approval/editing, but should not block the diagnostic deep dive.
 
 ## Approval boundary
 
