@@ -4,12 +4,17 @@
 from __future__ import annotations
 
 import argparse
+import html
+from html.parser import HTMLParser
 import json
 import math
+import re
 import subprocess
 import sys
 import tempfile
-from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from urllib.error import HTTPError, URLError
+from urllib.parse import parse_qsl, quote_plus, unquote, urlencode, urlparse, urlunparse
+from urllib.request import Request, urlopen
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -253,6 +258,26 @@ def business_intent_for_query(query: str | None) -> tuple[float, str, list[str]]
     return 0.75, "mixed", ["mixed intent; validate business value before content edits"]
 
 
+def zero_click_risk_for_query(query: str | None, intent_class: str | None = None) -> tuple[str, list[str]]:
+    q = (query or "").lower()
+    notes = []
+    risk_score = 0
+    if intent_class in {"commercial_research", "informational"}:
+        risk_score += 1
+        notes.append(f"{intent_class} intent often gets answered directly on the SERP")
+    if any(term in q for term in INFORMATIONAL_SERP_TERMS):
+        risk_score += 1
+        notes.append("price/how-much wording can trigger answer boxes or calculator-style snippets")
+    if any(term in q for term in {"near me", "seattle", "seatac", "tukwila", "ballard", "west seattle"}):
+        risk_score -= 1
+        notes.append("local modifier increases booking intent and reduces pure zero-click risk")
+    if risk_score >= 2:
+        return "high", notes
+    if risk_score == 1:
+        return "medium", notes
+    return "low", notes or ["query does not look primarily answer-box driven"]
+
+
 def is_branded_query(query: str | None, brand_terms: list[str] | None) -> bool:
     if not query or not brand_terms:
         return False
@@ -355,6 +380,8 @@ def ctr_gap_issue(gap: dict[str, Any], brand_terms: list[str] | None = None) -> 
         base_priority=impact_score,
         expected_click_delta=round(incremental_clicks * business_intent_score, 1),
         priority_score=round(score, 3),
+        primary_query=query,
+        intent_class=intent_class,
         score_components={
             "expected_impact": round(impact_score, 3),
             "confidence_score": confidence,
@@ -430,6 +457,8 @@ def query_ctr_issue(opp: dict[str, Any], brand_terms: list[str] | None = None) -
         base_priority=impact_score,
         expected_click_delta=round(incremental_clicks * business_intent_score, 1),
         priority_score=round(score, 3),
+        primary_query=query,
+        intent_class=intent_class,
         score_components={
             "expected_impact": round(impact_score, 3),
             "confidence_score": confidence,
@@ -520,6 +549,308 @@ def apply_prioritization(candidates: list[dict[str, Any]], learned: dict[str, An
 
 
 
+class PageSnapshotParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.title = ""
+        self.meta_description = ""
+        self.h1 = ""
+        self._tag_stack: list[str] = []
+        self._capture_title = False
+        self._capture_h1 = False
+        self._skip_depth = 0
+        self.body_chunks: list[str] = []
+        self.cta_texts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attrs_dict = {key.lower(): value or "" for key, value in attrs}
+        tag = tag.lower()
+        self._tag_stack.append(tag)
+        if tag in {"script", "style", "noscript", "svg"}:
+            self._skip_depth += 1
+        if tag == "title":
+            self._capture_title = True
+        if tag == "h1" and not self.h1:
+            self._capture_h1 = True
+        if tag == "meta" and attrs_dict.get("name", "").lower() == "description":
+            self.meta_description = attrs_dict.get("content", "").strip()
+        if tag in {"a", "button"}:
+            aria = attrs_dict.get("aria-label", "").strip()
+            if aria:
+                self.cta_texts.append(aria)
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if tag == "title":
+            self._capture_title = False
+        if tag == "h1":
+            self._capture_h1 = False
+        if tag in {"script", "style", "noscript", "svg"} and self._skip_depth:
+            self._skip_depth -= 1
+        if self._tag_stack:
+            self._tag_stack.pop()
+
+    def handle_data(self, data: str) -> None:
+        text = re.sub(r"\s+", " ", data).strip()
+        if not text:
+            return
+        if self._capture_title:
+            self.title = (self.title + " " + text).strip()
+        if self._capture_h1 and not self.h1:
+            self.h1 = (self.h1 + " " + text).strip()
+        if self._skip_depth == 0:
+            self.body_chunks.append(text)
+            if self._tag_stack and self._tag_stack[-1] in {"a", "button"}:
+                self.cta_texts.append(text)
+
+
+def fetch_url_text(url: str, timeout: int = 12) -> tuple[str | None, dict[str, Any]]:
+    request = Request(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0 (compatible; ToprankOpenClawSEOOperator/1.0; +https://openclaw.ai)",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        },
+    )
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            content_type = response.headers.get("content-type", "")
+            raw = response.read(750_000)
+            return raw.decode("utf-8", "ignore"), {"status": "ok", "http_status": response.status, "content_type": content_type}
+    except HTTPError as exc:
+        body = ""
+        try:
+            body = exc.read(80_000).decode("utf-8", "ignore")
+        except Exception:
+            body = ""
+        mitigated = "vercel" in body.lower() and ("security checkpoint" in body.lower() or "challenge" in body.lower())
+        return None, {"status": "blocked", "http_status": exc.code, "reason": "vercel_security_checkpoint" if mitigated else str(exc)}
+    except (TimeoutError, URLError) as exc:
+        return None, {"status": "error", "reason": str(exc)}
+
+
+def parse_html_snapshot(raw_html: str, source: str) -> dict[str, Any]:
+    parser = PageSnapshotParser()
+    parser.feed(raw_html)
+    body = "\n".join(parser.body_chunks)
+    body = re.sub(r"\s+", " ", html.unescape(body)).strip()
+    return {
+        "source": source,
+        "status": "ok",
+        "title": html.unescape(parser.title).strip(),
+        "meta_description": html.unescape(parser.meta_description).strip(),
+        "h1": html.unescape(parser.h1).strip(),
+        "above_the_fold_text": body[:1800],
+        "cta_texts": sorted({text.strip() for text in parser.cta_texts if text.strip()})[:12],
+    }
+
+
+def parse_frontmatter_snapshot(markdown: str, source_path: Path) -> dict[str, Any]:
+    frontmatter: dict[str, Any] = {}
+    body = markdown
+    if markdown.startswith("---"):
+        parts = markdown.split("---", 2)
+        if len(parts) >= 3:
+            body = parts[2]
+            for line in parts[1].splitlines():
+                if ":" not in line or line.strip().startswith("[") or line.strip().startswith("]"):
+                    continue
+                key, value = line.split(":", 1)
+                value = value.strip().strip('"').strip("'")
+                if value:
+                    frontmatter[key.strip()] = value
+    heading = ""
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("# "):
+            heading = stripped[2:].strip()
+            break
+    plain = re.sub(r"```.*?```", " ", body, flags=re.S)
+    plain = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", plain)
+    plain = re.sub(r"\[[^\]]+\]\([^)]*\)", lambda m: m.group(0).split("]", 1)[0].lstrip("["), plain)
+    plain = re.sub(r"[#*_>`-]+", " ", plain)
+    plain = re.sub(r"\s+", " ", plain).strip()
+    return {
+        "source": "local_source",
+        "source_path": str(source_path),
+        "status": "ok",
+        "title": frontmatter.get("title", ""),
+        "meta_description": frontmatter.get("description", ""),
+        "h1": heading or frontmatter.get("title", ""),
+        "above_the_fold_text": plain[:1800],
+        "cta_texts": sorted(set(re.findall(r"(?i)\b(book now|book|reserve|call|schedule|request quote|get quote)\b", plain[:2500])))[:12],
+    }
+
+
+def discover_local_source(url: str | None, site_profile: dict[str, Any] | None = None) -> Path | None:
+    if not url:
+        return None
+    parsed = urlparse(url)
+    slug = Path(parsed.path).name
+    if not slug:
+        return None
+    profile = site_profile or {}
+    configured_roots = [Path(root).expanduser() for root in profile.get("source_roots", [])]
+    project_root = profile.get("local_project_root")
+    if project_root:
+        configured_roots.append(Path(project_root).expanduser())
+    search_roots = configured_roots or list((Path.home() / "Documents" / "Projects").glob("*"))
+    candidates: list[Path] = []
+    common_rel_paths = [
+        Path("content/blogs") / f"{slug}.mdx",
+        Path("content/blogs") / f"{slug}.md",
+        Path("src/content/blogs") / f"{slug}.mdx",
+        Path("app") / parsed.path.strip("/") / "page.tsx",
+        Path("pages") / f"{slug}.tsx",
+    ]
+    for root in search_roots[:80]:
+        if not root.exists() or not root.is_dir():
+            continue
+        for rel in common_rel_paths:
+            path = root / rel
+            if path.exists() and path.is_file():
+                candidates.append(path)
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def page_snapshot_for_url(url: str | None, site_profile: dict[str, Any] | None = None, live: bool = False) -> dict[str, Any]:
+    source_path = discover_local_source(url, site_profile)
+    if source_path:
+        return parse_frontmatter_snapshot(source_path.read_text(errors="ignore"), source_path)
+    if live and url:
+        raw_html, meta = fetch_url_text(url)
+        if raw_html:
+            return parse_html_snapshot(raw_html, "live_fetch")
+        return {"source": "live_fetch", **meta}
+    return {"source": "none", "status": "unavailable", "reason": "no local source mapping and live fetch disabled"}
+
+
+def parse_duckduckgo_results(raw_html: str) -> list[dict[str, str]]:
+    results: list[dict[str, str]] = []
+    for match in re.finditer(r'<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>(.*?)</a>', raw_html, re.S):
+        href = html.unescape(match.group(1))
+        parsed_href = urlparse(href)
+        if parsed_href.path.startswith("/l/"):
+            params = dict(parse_qsl(parsed_href.query))
+            href = unquote(params.get("uddg", href))
+        elif href.startswith("//duckduckgo.com/l/"):
+            params = dict(parse_qsl(urlparse("https:" + href).query))
+            href = unquote(params.get("uddg", href))
+        title = re.sub(r"<.*?>", "", match.group(2), flags=re.S)
+        block = raw_html[match.end(): match.end() + 2500]
+        snippet_match = re.search(r'class="result__snippet"[^>]*>(.*?)</(?:a|div)>', block, re.S)
+        snippet_raw = snippet_match.group(1) if snippet_match else ""
+        snippet = re.sub(r"<.*?>", "", snippet_raw, flags=re.S)
+        domain = urlparse(href).netloc.lower().removeprefix("www.")
+        if not domain:
+            continue
+        results.append({
+            "title": html.unescape(re.sub(r"\s+", " ", title)).strip(),
+            "url": href,
+            "snippet": html.unescape(re.sub(r"\s+", " ", snippet)).strip(),
+            "domain": domain,
+        })
+        if len(results) >= 8:
+            break
+    return results
+
+def serp_snapshot_for_query(query: str | None, site_id: str, live: bool = False) -> dict[str, Any]:
+    if not query:
+        return {"source": "none", "status": "skipped", "reason": "no query available"}
+    if not live:
+        return {"source": "duckduckgo_html", "status": "skipped", "reason": "live SERP disabled"}
+    url = "https://duckduckgo.com/html/?q=" + quote_plus(query)
+    raw_html, meta = fetch_url_text(url)
+    if not raw_html:
+        return {"source": "duckduckgo_html", **meta}
+    results = parse_duckduckgo_results(raw_html)
+    if not results:
+        return {"source": "duckduckgo_html", "status": "no_results_parsed", "query": query, "results": []}
+    site_domain = site_id.lower().removeprefix("www.")
+    own_positions = [idx + 1 for idx, result in enumerate(results) if site_domain in result.get("domain", "")]
+    answer_like = any(re.search(r"\$\d|\b\d+\s*(?:-|to)\s*\$?\d+|per night|per day|average", " ".join([r.get("title", ""), r.get("snippet", "")]), re.I) for r in results[:5])
+    return {
+        "source": "duckduckgo_html",
+        "status": "ok",
+        "query": query,
+        "results": results[:5],
+        "own_domain_positions": own_positions,
+        "answer_like_serp": answer_like,
+        "competitor_domains": [r["domain"] for r in results[:5] if r.get("domain") and site_domain not in r["domain"]],
+    }
+
+
+def analyze_page_packaging(page_snapshot: dict[str, Any], query: str | None) -> dict[str, Any]:
+    text = (page_snapshot.get("above_the_fold_text") or "").lower()
+    title = (page_snapshot.get("title") or "").lower()
+    description = (page_snapshot.get("meta_description") or "").lower()
+    q = (query or "").lower()
+    wants_price = any(term in q for term in INFORMATIONAL_SERP_TERMS)
+    price_answer = bool(re.search(r"\$\d|\b\d+\s*(?:-|to)\s*\$?\d+|per night|per day", text[:1400], re.I))
+    cta = bool(re.search(r"\b(book|reserve|call|schedule|get quote|request quote)\b", text[:1600], re.I)) or bool(page_snapshot.get("cta_texts"))
+    query_terms = [term for term in re.findall(r"[a-z]{4,}", q) if term not in {"much", "does", "cost", "board", "with", "what"}]
+    missing_terms = [term for term in query_terms if term not in title and term not in description and term not in text[:1400]]
+    observations = []
+    if wants_price and not price_answer:
+        observations.append("above-the-fold text does not give a fast price/range answer")
+    if not cta:
+        observations.append("no obvious booking/call CTA detected above the fold")
+    if missing_terms:
+        observations.append(f"query terms not visible early: {', '.join(missing_terms[:5])}")
+    if page_snapshot.get("status") != "ok":
+        observations.append(f"page snapshot unavailable: {page_snapshot.get('reason') or page_snapshot.get('status')}")
+    return {
+        "status": "ok" if page_snapshot.get("status") == "ok" else "partial",
+        "has_fast_price_answer_above_fold": price_answer if wants_price else None,
+        "has_booking_cta_above_fold": cta,
+        "missing_query_terms_above_fold": missing_terms[:8],
+        "observations": observations or ["no obvious above-the-fold packaging issue detected by static analysis"],
+    }
+
+
+def deep_dive_diagnostic(issue: dict[str, Any], site_id: str, site_profile: dict[str, Any] | None = None, live: bool = False) -> dict[str, Any]:
+    query = issue.get("primary_query")
+    intent_class = issue.get("intent_class")
+    target = issue.get("target") or issue.get("canonical_target") or issue.get("raw_target")
+    serp = serp_snapshot_for_query(query, site_id, live=live)
+    page_snapshot = page_snapshot_for_url(target, site_profile, live=live)
+    packaging = analyze_page_packaging(page_snapshot, query)
+    zero_click_risk, zero_click_notes = zero_click_risk_for_query(query, intent_class)
+    checks = {
+        "serp_inspected": serp.get("status") == "ok" and bool(serp.get("results")),
+        "current_snippet_inspected": page_snapshot.get("status") == "ok",
+        "above_the_fold_inspected": packaging.get("status") in {"ok", "partial"},
+        "zero_click_risk_accounted_for": True,
+    }
+    return {
+        "status": "completed" if all(checks.values()) else "partial",
+        "query": query,
+        "target": target,
+        "checks": checks,
+        "serp": serp,
+        "current_snippet": {
+            "source": page_snapshot.get("source"),
+            "source_path": page_snapshot.get("source_path"),
+            "status": page_snapshot.get("status"),
+            "title": page_snapshot.get("title"),
+            "meta_description": page_snapshot.get("meta_description"),
+            "h1": page_snapshot.get("h1"),
+        },
+        "above_the_fold": packaging,
+        "zero_click_risk": {"level": zero_click_risk, "notes": zero_click_notes},
+    }
+
+
+def add_deep_dive_diagnostics(issues: list[dict[str, Any]], site_id: str, site_profile: dict[str, Any] | None = None, live: bool = False) -> list[dict[str, Any]]:
+    enriched = []
+    for issue in issues:
+        updated = dict(issue)
+        if issue.get("recommended_action_type") in {"snippet_content_packaging", "meta_tags", "page_improvement", "query_intent_mapping"}:
+            updated["deep_dive"] = deep_dive_diagnostic(issue, site_id, site_profile, live=live)
+        enriched.append(updated)
+    return enriched
+
+
 BUSINESS_IMPACT_CONTEXT_FIELDS = {
     "service_value_weights": "Relative revenue/margin value by service (boarding, daycare, grooming, airport layover, etc.)",
     "target_customer_priority": "Priority customer segments (locals, travelers, airport layover, long-stay boarding, etc.)",
@@ -595,7 +926,15 @@ def build_business_context_request(site_id: str, context_check: dict[str, Any]) 
     }
 
 
-def build_payload(site_id: str, analysis: dict[str, Any], learned: dict[str, Any], goal: dict[str, Any] | None, business_context: dict[str, Any] | None = None) -> dict[str, Any]:
+def build_payload(
+    site_id: str,
+    analysis: dict[str, Any],
+    learned: dict[str, Any],
+    goal: dict[str, Any] | None,
+    business_context: dict[str, Any] | None = None,
+    site_profile: dict[str, Any] | None = None,
+    live_diagnostics: bool = False,
+) -> dict[str, Any]:
     metrics = metric_snapshot_from_analysis(analysis)
     primary_metric = None
     if goal and goal.get("primary_metric"):
@@ -624,6 +963,7 @@ def build_payload(site_id: str, analysis: dict[str, Any], learned: dict[str, Any
         }
         for issue in top_issues
     ]
+    top_issues = add_deep_dive_diagnostics(top_issues, site_id, site_profile, live=live_diagnostics)
 
     summary = analysis.get("summary") or {}
     non_brand_clicks = metrics.get(primary_metric)
@@ -656,6 +996,7 @@ def build_payload(site_id: str, analysis: dict[str, Any], learned: dict[str, Any
                 "canonical_target": issue.get("canonical_target"),
                 "score_components": issue.get("score_components", {}),
                 "operator_judgment_notes": issue.get("operator_judgment_notes", []),
+                "deep_dive": issue.get("deep_dive"),
                 "needs_business_context": context_check["score"] < 0.75,
                 "learned_multiplier": issue.get("learned_multiplier", 1.0),
             }
@@ -681,6 +1022,7 @@ def build_payload(site_id: str, analysis: dict[str, Any], learned: dict[str, Any
                     "approval_required": True,
                     "score_components": issue.get("score_components", {}),
                     "operator_judgment_notes": issue.get("operator_judgment_notes", []),
+                    "deep_dive": issue.get("deep_dive"),
                     "business_context_score": context_check["score"],
                     "business_context_gaps": context_check["missing_fields"],
                     "business_context_questions": context_check["questions"],
@@ -727,6 +1069,13 @@ def build_payload(site_id: str, analysis: dict[str, Any], learned: dict[str, Any
                     "name": "recommendation quality gate",
                     "status": "pass" if top_issues[0].get("priority_score", 0) >= 0.35 else "warning",
                     "notes": "; ".join(top_issues[0].get("operator_judgment_notes", [])) or "Top action has explicit score components for operator review.",
+                },
+                {
+                    "name": "deep dive diagnostics",
+                    "status": "pass" if top_issues[0].get("deep_dive", {}).get("status") == "completed" else "warning",
+                    "notes": "Top recommendation includes SERP, snippet, above-the-fold, and zero-click diagnostics before edit approval." if top_issues[0].get("deep_dive") else "No deep dive was needed for the top recommendation.",
+                    "deep_dive_status": top_issues[0].get("deep_dive", {}).get("status"),
+                    "checks": top_issues[0].get("deep_dive", {}).get("checks", {}),
                 },
                 {
                     "name": "business impact context",
@@ -780,7 +1129,7 @@ def main(argv: list[str]) -> int:
     analysis["_brand_terms"] = profile.get("brand_terms", [])
     business_context_path = Path.home() / ".toprank" / "business-context" / f"{site_id}.json"
     business_context = load_json(business_context_path, {})
-    payload = build_payload(site_id, analysis, learned, active_goal, business_context)
+    payload = build_payload(site_id, analysis, learned, active_goal, business_context, profile, live_diagnostics=True)
     result = persist_payload(args.site, payload, root=root)
     metric_item = next((item for item in payload.get("queue_items", []) if item.get("primary_metric")), None)
     result["primary_metric"] = metric_item["primary_metric"] if metric_item else None
