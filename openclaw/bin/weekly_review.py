@@ -8,6 +8,7 @@ import html
 from html.parser import HTMLParser
 import json
 import math
+import os
 import re
 import subprocess
 import sys
@@ -198,19 +199,22 @@ def make_issue(
 
 LOCAL_INTENT_TERMS = {
     "near me",
-    "seattle",
-    "seatac",
-    "tukwila",
-    "ballard",
-    "west seattle",
+    "nearby",
+    "local",
+    "open now",
 }
 COMMERCIAL_SERVICE_TERMS = {
-    "board",
-    "boarding",
-    "daycare",
-    "grooming",
-    "kennel",
-    "pet hotel",
+    "service",
+    "services",
+    "repair",
+    "installation",
+    "contractor",
+    "company",
+    "provider",
+    "appointment",
+    "booking",
+    "quote",
+    "consultation",
 }
 INFORMATIONAL_SERP_TERMS = {
     "how much",
@@ -268,7 +272,7 @@ def zero_click_risk_for_query(query: str | None, intent_class: str | None = None
     if any(term in q for term in INFORMATIONAL_SERP_TERMS):
         risk_score += 1
         notes.append("price/how-much wording can trigger answer boxes or calculator-style snippets")
-    if any(term in q for term in {"near me", "seattle", "seatac", "tukwila", "ballard", "west seattle"}):
+    if any(term in q for term in LOCAL_INTENT_TERMS):
         risk_score -= 1
         notes.append("local modifier increases booking intent and reduces pure zero-click risk")
     if risk_score >= 2:
@@ -604,14 +608,35 @@ class PageSnapshotParser(HTMLParser):
                 self.cta_texts.append(text)
 
 
-def fetch_url_text(url: str, timeout: int = 12) -> tuple[str | None, dict[str, Any]]:
-    request = Request(
-        url,
-        headers={
-            "User-Agent": "Mozilla/5.0 (compatible; ToprankOpenClawSEOOperator/1.0; +https://openclaw.ai)",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        },
-    )
+def live_fetch_headers(site_profile: dict[str, Any] | None = None) -> dict[str, str]:
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; ToprankOpenClawSEOOperator/1.0; +https://openclaw.ai)",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
+    profile = site_profile or {}
+    for name, value in (profile.get("live_fetch_headers") or {}).items():
+        if value:
+            headers[str(name)] = str(value)
+    for name, env_name in (profile.get("live_fetch_header_env") or {}).items():
+        value = os.environ.get(str(env_name))
+        if value:
+            headers[str(name)] = value
+
+    bypass_env_names = [
+        profile.get("vercel_protection_bypass_env"),
+        "TOPRANK_VERCEL_PROTECTION_BYPASS",
+        "VERCEL_PROTECTION_BYPASS",
+        "VERCEL_AUTOMATION_BYPASS_SECRET",
+    ]
+    for env_name in bypass_env_names:
+        if env_name and os.environ.get(str(env_name)):
+            headers["x-vercel-protection-bypass"] = os.environ[str(env_name)]
+            break
+    return headers
+
+
+def fetch_url_text(url: str, timeout: int = 12, site_profile: dict[str, Any] | None = None) -> tuple[str | None, dict[str, Any]]:
+    request = Request(url, headers=live_fetch_headers(site_profile))
     try:
         with urlopen(request, timeout=timeout) as response:
             content_type = response.headers.get("content-type", "")
@@ -718,7 +743,7 @@ def page_snapshot_for_url(url: str | None, site_profile: dict[str, Any] | None =
     if source_path:
         return parse_frontmatter_snapshot(source_path.read_text(errors="ignore"), source_path)
     if live and url:
-        raw_html, meta = fetch_url_text(url)
+        raw_html, meta = fetch_url_text(url, site_profile=site_profile)
         if raw_html:
             return parse_html_snapshot(raw_html, "live_fetch")
         return {"source": "live_fetch", **meta}
@@ -808,18 +833,45 @@ def analyze_page_packaging(page_snapshot: dict[str, Any], query: str | None) -> 
     }
 
 
+def matching_serp_result(serp: dict[str, Any], target: str | None) -> dict[str, Any] | None:
+    if not target:
+        return None
+    parsed_target = urlparse(target)
+    target_domain = parsed_target.netloc.lower().removeprefix("www.")
+    target_path = parsed_target.path.rstrip("/")
+    for result in serp.get("results") or []:
+        parsed_result = urlparse(result.get("url") or "")
+        result_domain = parsed_result.netloc.lower().removeprefix("www.")
+        result_path = parsed_result.path.rstrip("/")
+        if target_domain and target_domain == result_domain and target_path == result_path:
+            return result
+    return None
+
+
 def deep_dive_diagnostic(issue: dict[str, Any], site_id: str, site_profile: dict[str, Any] | None = None, live: bool = False) -> dict[str, Any]:
     query = issue.get("primary_query")
     intent_class = issue.get("intent_class")
     target = issue.get("target") or issue.get("canonical_target") or issue.get("raw_target")
+    if isinstance(target, str) and target.startswith("/"):
+        target = f"https://www.{site_id}{target}"
     serp = serp_snapshot_for_query(query, site_id, live=live)
     page_snapshot = page_snapshot_for_url(target, site_profile, live=live)
+    serp_result = matching_serp_result(serp, target)
+    snippet_snapshot = page_snapshot
+    if page_snapshot.get("status") != "ok" and serp_result:
+        snippet_snapshot = {
+            "source": "serp_result",
+            "status": "ok",
+            "title": serp_result.get("title"),
+            "meta_description": serp_result.get("snippet"),
+            "h1": None,
+        }
     packaging = analyze_page_packaging(page_snapshot, query)
     zero_click_risk, zero_click_notes = zero_click_risk_for_query(query, intent_class)
     checks = {
         "serp_inspected": serp.get("status") == "ok" and bool(serp.get("results")),
-        "current_snippet_inspected": page_snapshot.get("status") == "ok",
-        "above_the_fold_inspected": packaging.get("status") in {"ok", "partial"},
+        "current_snippet_inspected": snippet_snapshot.get("status") == "ok",
+        "above_the_fold_inspected": packaging.get("status") == "ok",
         "zero_click_risk_accounted_for": True,
     }
     return {
@@ -829,12 +881,12 @@ def deep_dive_diagnostic(issue: dict[str, Any], site_id: str, site_profile: dict
         "checks": checks,
         "serp": serp,
         "current_snippet": {
-            "source": page_snapshot.get("source"),
-            "source_path": page_snapshot.get("source_path"),
-            "status": page_snapshot.get("status"),
-            "title": page_snapshot.get("title"),
-            "meta_description": page_snapshot.get("meta_description"),
-            "h1": page_snapshot.get("h1"),
+            "source": snippet_snapshot.get("source"),
+            "source_path": snippet_snapshot.get("source_path"),
+            "status": snippet_snapshot.get("status"),
+            "title": snippet_snapshot.get("title"),
+            "meta_description": snippet_snapshot.get("meta_description"),
+            "h1": snippet_snapshot.get("h1"),
         },
         "above_the_fold": packaging,
         "zero_click_risk": {"level": zero_click_risk, "notes": zero_click_notes},
@@ -845,15 +897,206 @@ def add_deep_dive_diagnostics(issues: list[dict[str, Any]], site_id: str, site_p
     enriched = []
     for issue in issues:
         updated = dict(issue)
-        if issue.get("recommended_action_type") in {"snippet_content_packaging", "meta_tags", "page_improvement", "query_intent_mapping"}:
+        if issue.get("recommended_action_type") in {"snippet_content_packaging", "meta_tags", "page_improvement", "query_intent_mapping", "local_intent_ownership"}:
             updated["deep_dive"] = deep_dive_diagnostic(issue, site_id, site_profile, live=live)
         enriched.append(updated)
     return enriched
 
 
+def context_values(value: Any) -> list[Any]:
+    if value is None or value == "":
+        return []
+    if isinstance(value, (list, dict)) and not value:
+        return []
+    if isinstance(value, list):
+        return [item for nested in value for item in context_values(nested)]
+    if isinstance(value, dict):
+        return [item for nested in value.values() for item in context_values(nested)]
+    return [value]
+
+
+def context_text(value: Any) -> str:
+    return " ".join(str(item).lower() for item in context_values(value))
+
+
+def page_role_entries(business_context: dict[str, Any] | None) -> list[tuple[str, str]]:
+    page_roles = (business_context or {}).get("page_role_map") or {}
+    entries: list[tuple[str, str]] = []
+    if isinstance(page_roles, dict):
+        for locator, role in page_roles.items():
+            entries.append((str(locator), context_text(role)))
+    elif isinstance(page_roles, list):
+        for item in page_roles:
+            if isinstance(item, dict):
+                locator = item.get("url") or item.get("path") or item.get("page") or item.get("target")
+                role = item.get("role") or item.get("page_role") or item.get("type") or item
+                if locator:
+                    entries.append((str(locator), context_text(role)))
+            else:
+                entries.append((str(item), str(item).lower()))
+    return entries
+
+
+def matching_page_role(reference_url: str | None, page_roles: Any) -> str:
+    if not reference_url:
+        return ""
+    parsed = urlparse(reference_url)
+    target_path = parsed.path.rstrip("/") or "/"
+    target_url = reference_url.rstrip("/")
+    pseudo_context = {"page_role_map": page_roles}
+    for locator, role_text in page_role_entries(pseudo_context):
+        locator_url = url_for_context_path(reference_url, locator).rstrip("/")
+        locator_path = urlparse(locator_url).path.rstrip("/") or "/"
+        if locator_url == target_url or locator_path == target_path:
+            return role_text
+    return ""
+
+
+def business_context_local_label(business_context: dict[str, Any] | None) -> str:
+    context = business_context or {}
+    geography = str(context.get("primary_geography") or "").strip()
+    if geography:
+        return geography
+    location_priorities = context.get("location_priorities")
+    if isinstance(location_priorities, dict):
+        priority_order = {"high": 0, "medium": 1, "low": 2}
+        ranked_locations = sorted(
+            location_priorities.items(),
+            key=lambda item: priority_order.get(str((item[1] or {}).get("priority", "") if isinstance(item[1], dict) else "").lower(), 3),
+        )
+        if ranked_locations:
+            return "/".join(str(location) for location, _details in ranked_locations[:3])
+    locations = context.get("target_locations") or context.get("locations") or location_priorities or []
+    values = context_values(locations)
+    if values:
+        return "/".join(str(value) for value in values[:3])
+    return "local"
+
+def url_for_context_path(reference_url: str | None, path: str) -> str:
+    if path.startswith("http://") or path.startswith("https://"):
+        return path
+    parsed = urlparse(reference_url or "")
+    scheme = parsed.scheme or "https"
+    netloc = parsed.netloc
+    if not netloc:
+        return path
+    return urlunparse((scheme, netloc, path if path.startswith("/") else f"/{path}", "", "", ""))
+
+
+def query_matches_any(query: str | None, terms: Any) -> bool:
+    q = (query or "").lower()
+    if not q:
+        return False
+    return any(str(term).lower() in q for term in context_values(terms) if term)
+
+
+def context_page_candidates(business_context: dict[str, Any] | None, reference_url: str | None) -> dict[str, str | None]:
+    local_research = None
+    transactional = None
+    support = None
+    for locator, role_text in page_role_entries(business_context):
+        url = url_for_context_path(reference_url, locator)
+        if local_research is None and "local" in role_text and any(term in role_text for term in ["commercial", "research", "price", "cost"]):
+            local_research = url
+        if transactional is None and "transactional" in role_text:
+            transactional = url
+        if support is None and ("support" in role_text or "informational" in role_text):
+            support = url
+    return {"local_research": local_research, "transactional": transactional, "support": support}
+
+
+def business_context_says_national_deprioritized(business_context: dict[str, Any] | None) -> bool:
+    priority = (business_context or {}).get("target_customer_priority") or {}
+    deprioritized = priority.get("deprioritized", []) if isinstance(priority, dict) else []
+    text = context_text(deprioritized)
+    return "national" in text or "outside service area" in text or "non-local" in text
+
+
+def booking_intent_terms(hierarchy: Any) -> tuple[list[Any], list[Any]]:
+    if isinstance(hierarchy, dict):
+        return context_values(hierarchy.get("highest_priority", [])), context_values(hierarchy.get("supporting_only", []))
+    ordered = context_values(hierarchy)
+    if not ordered:
+        return [], []
+    high_priority = ordered[:1]
+    supporting = ordered[1:]
+    informational_markers = ("cost", "price", "how much", "average", "guide", "research", "compare")
+    for term in ordered:
+        if any(marker in str(term).lower() for marker in informational_markers) and term not in supporting:
+            supporting.append(term)
+    return high_priority, supporting
+
+def apply_business_context_to_issue(issue: dict[str, Any], business_context: dict[str, Any] | None, site_id: str | None = None) -> dict[str, Any]:
+    if not business_context:
+        return issue
+    query = issue.get("primary_query")
+    hierarchy = business_context.get("booking_intent_hierarchy") or {}
+    high_priority_terms, supporting_terms = booking_intent_terms(hierarchy)
+    page_roles = business_context.get("page_role_map") or {}
+    target = issue.get("target") or issue.get("canonical_target") or issue.get("raw_target")
+    reference_url = target or (business_context or {}).get("target_url") or (f"https://www.{site_id}" if site_id else None)
+    role_text = matching_page_role(target, page_roles)
+    is_support_query = query_matches_any(query, supporting_terms)
+    is_high_priority_query = query_matches_any(query, high_priority_terms)
+    is_support_page = "support" in role_text or "informational" in role_text
+    national_deprioritized = business_context_says_national_deprioritized(business_context)
+    candidates = context_page_candidates(business_context, reference_url)
+    context_support_page = candidates.get("support")
+
+    if issue.get("recommended_action_type") in {"snippet_content_packaging", "meta_tags", "query_intent_mapping"} and is_support_query and not is_high_priority_query and (is_support_page or context_support_page or national_deprioritized):
+        source_support_page = target or context_support_page or reference_url
+        preferred_owner = candidates.get("local_research") or candidates.get("transactional") or source_support_page
+        updated = dict(issue)
+        updated["recommended_action_type"] = "local_intent_ownership"
+        locality = business_context_local_label(business_context)
+        updated["title"] = f"Resolve {locality} intent ownership for '{query}'"
+        updated["target"] = preferred_owner
+        updated["canonical_target"] = preferred_owner
+        updated["source_target"] = source_support_page
+        updated["consolidation_targets"] = {
+            "source_support_page": source_support_page,
+            "preferred_local_owner": preferred_owner,
+            "conversion_target": candidates.get("transactional"),
+        }
+        updated["expected_click_delta"] = None
+        updated["expected_impact"] = f"Clarify which {locality} page should own this intent; optimize for qualified local outcomes, not raw support-page CTR."
+        updated.setdefault("operator_judgment_notes", [])
+        ownership_notes = [
+            "supporting intent should route qualified demand to the best local owner",
+            "decide whether to consolidate, canonicalize, redirect, or internally link from the support page to the local owner",
+        ]
+        if national_deprioritized:
+            ownership_notes = [
+                "business context deprioritizes national informational clicks",
+                "do not optimize the support page for broad national CTR unless it routes qualified local intent",
+                *ownership_notes,
+            ]
+        updated["operator_judgment_notes"] = [*updated["operator_judgment_notes"], *ownership_notes]
+        score_components = dict(updated.get("score_components", {}))
+        score_components["business_context_goal_score"] = 1.0
+        if national_deprioritized:
+            score_components["national_click_discount"] = 0.25
+        updated["score_components"] = score_components
+        updated["business_context_adjustment"] = {
+            "from_action_type": issue.get("recommended_action_type"),
+            "reason": f"supporting query is not the direct business goal; prioritize {locality} ownership",
+            "preferred_local_owner": preferred_owner,
+            "source_support_page": source_support_page,
+        }
+        raw_priority = float(issue.get("priority_score", 0))
+        if national_deprioritized:
+            updated["priority_score"] = round(raw_priority * score_components["national_click_discount"], 3)
+        return updated
+    return issue
+
+
+def apply_business_context(candidates: list[dict[str, Any]], business_context: dict[str, Any] | None, site_id: str | None = None) -> list[dict[str, Any]]:
+    return [apply_business_context_to_issue(candidate, business_context, site_id=site_id) for candidate in candidates]
+
+
 BUSINESS_IMPACT_CONTEXT_FIELDS = {
-    "service_value_weights": "Relative revenue/margin value by service (boarding, daycare, grooming, airport layover, etc.)",
-    "target_customer_priority": "Priority customer segments (locals, travelers, airport layover, long-stay boarding, etc.)",
+    "service_value_weights": "Relative revenue/margin value by service or product line",
+    "target_customer_priority": "Priority customer segments (local buyers, high-margin segments, urgent-need customers, recurring customers, etc.)",
     "location_priorities": "Location-level priority/capacity/margin context",
     "conversion_events": "Organic conversion events or booking funnel signals",
     "booking_intent_hierarchy": "Which query intents are most likely to become bookings",
@@ -877,19 +1120,19 @@ def business_context_questions(gaps: list[dict[str, str]]) -> list[str]:
     wanted = {gap["field"] for gap in gaps}
     questions = []
     if "service_value_weights" in wanted:
-        questions.append("Rank services by business value/margin: boarding, daycare, grooming, airport layover, pet taxi, etc.")
+        questions.append("Rank services or product lines by business value/margin.")
     if "target_customer_priority" in wanted:
-        questions.append("Which customers matter most: locals, SeaTac travelers, airport layover/import/export customers, long-stay boarding, recurring daycare, grooming?")
+        questions.append("Which customer segments matter most: local buyers, high-margin services, recurring customers, urgent-need customers, enterprise accounts, etc.?")
     if "location_priorities" in wanted:
-        questions.append("Which locations should SEO prioritize right now, and are any capacity-constrained: Tukwila, Ballard, West Seattle?")
+        questions.append("Which markets or service areas should SEO prioritize right now, and are any capacity-constrained?")
     if "conversion_events" in wanted:
-        questions.append("What organic conversion signals should count: booking form starts, completed bookings, calls, quote requests, Gingr reservations, GA4 events?")
+        questions.append("What organic conversion signals should count: form starts, completed purchases/bookings, calls, quote requests, CRM events, GA4 events?")
     if "booking_intent_hierarchy" in wanted:
-        questions.append("Give a rough intent ranking: e.g. dog boarding Seatac > dog boarding Seattle > dog boarding cost > dog boarding near me.")
+        questions.append("Give a rough intent ranking: e.g. high-intent local/service query > category query > cost/research query > broad informational query.")
     if "local_proof_points" in wanted:
-        questions.append("What proof points should snippets emphasize: 5am-9pm pickup, 24/7 supervision, airport proximity, photo updates, private suites, multi-location coverage?")
+        questions.append("What proof points should snippets emphasize: response time, certifications, warranty, reviews, pricing transparency, local coverage, multi-location coverage?")
     if "serp_competitor_positioning" in wanted:
-        questions.append("For priority queries, who must we beat or differentiate from: Rover, Wag, Camp Bow Wow, Dogtopia, local kennels, Google Business Profile results?")
+        questions.append("For priority queries, who must we beat or differentiate from: direct competitors, marketplaces/directories, map-pack results, review sites, or national brands?")
     if "page_role_map" in wanted:
         questions.append("Which pages are transactional landing pages vs informational support pages?")
     return questions
@@ -943,7 +1186,7 @@ def build_payload(
         primary_metric = DEFAULT_PRIMARY_METRIC if DEFAULT_PRIMARY_METRIC in metrics else next(iter(metrics.keys()), DEFAULT_PRIMARY_METRIC)
 
     context_check = context_quality_check(business_context)
-    candidates = derive_candidate_issues(analysis)
+    candidates = dedupe_candidates(apply_business_context(derive_candidate_issues(analysis), business_context, site_id=site_id))
     ranked = apply_prioritization(candidates, learned, primary_metric)
     top_issues = ranked[:3] if ranked else [
         make_issue(
@@ -976,7 +1219,7 @@ def build_payload(
         action_id = f"weekly_action_{idx:02d}"
         action_type = issue["recommended_action_type"]
         expected_delta = issue.get("expected_click_delta")
-        expected_impact = f"Address {action_type.replace('_', ' ')} opportunity surfaced in the weekly review."
+        expected_impact = issue.get("expected_impact") or f"Address {action_type.replace('_', ' ')} opportunity surfaced in the weekly review."
         if isinstance(expected_delta, (int, float)) and expected_delta > 0:
             expected_impact = f"Estimated upside: ~{expected_delta:g} incremental clicks if the opportunity is fixed."
         elif isinstance(expected_delta, (int, float)) and expected_delta < 0:
@@ -997,6 +1240,9 @@ def build_payload(
                 "score_components": issue.get("score_components", {}),
                 "operator_judgment_notes": issue.get("operator_judgment_notes", []),
                 "deep_dive": issue.get("deep_dive"),
+                "business_context_adjustment": issue.get("business_context_adjustment"),
+                "consolidation_targets": issue.get("consolidation_targets"),
+                "source_target": issue.get("source_target"),
                 "needs_business_context": context_check["score"] < 0.75,
                 "learned_multiplier": issue.get("learned_multiplier", 1.0),
             }
@@ -1023,6 +1269,9 @@ def build_payload(
                     "score_components": issue.get("score_components", {}),
                     "operator_judgment_notes": issue.get("operator_judgment_notes", []),
                     "deep_dive": issue.get("deep_dive"),
+                    "business_context_adjustment": issue.get("business_context_adjustment"),
+                    "consolidation_targets": issue.get("consolidation_targets"),
+                    "source_target": issue.get("source_target"),
                     "business_context_score": context_check["score"],
                     "business_context_gaps": context_check["missing_fields"],
                     "business_context_questions": context_check["questions"],
