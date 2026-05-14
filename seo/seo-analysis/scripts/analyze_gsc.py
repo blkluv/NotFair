@@ -21,6 +21,7 @@ import urllib.error
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 
+from _gcloud import gcloud_run
 from _uid import portable_uid, secure_write_json
 
 
@@ -56,7 +57,7 @@ def get_quota_project():
 
 def get_access_token():
     try:
-        result = subprocess.run(
+        result = gcloud_run(
             ["gcloud", "auth", "application-default", "print-access-token"],
             capture_output=True, text=True, timeout=15
         )

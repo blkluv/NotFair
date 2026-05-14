@@ -18,6 +18,8 @@ import subprocess
 import sys
 import urllib.request
 
+from _gcloud import gcloud_run
+
 
 def check_python_version():
     if sys.version_info < (3, 8):
@@ -75,7 +77,7 @@ def check_gcloud():
 def check_gcloud_project():
     """Ensure gcloud has an active project. Run gcloud init if not."""
     try:
-        result = subprocess.run(
+        result = gcloud_run(
             ["gcloud", "config", "get-value", "project"],
             capture_output=True, text=True, timeout=15,
         )
@@ -100,7 +102,7 @@ def check_gcloud_project():
 
     print("Running 'gcloud init' to set up your project...", file=sys.stderr)
     print("", file=sys.stderr)
-    init_result = subprocess.run(["gcloud", "init"])
+    init_result = gcloud_run(["gcloud", "init"])
     if init_result.returncode != 0:
         print("", file=sys.stderr)
         print("ERROR: gcloud init failed or was cancelled.", file=sys.stderr)
@@ -108,7 +110,7 @@ def check_gcloud_project():
         sys.exit(1)
 
     # Verify project was set
-    verify = subprocess.run(
+    verify = gcloud_run(
         ["gcloud", "config", "get-value", "project"],
         capture_output=True, text=True, timeout=15,
     )
@@ -124,7 +126,7 @@ def check_gcloud_project():
 def check_search_console_api():
     """Ensure the Search Console API is enabled in the active project."""
     try:
-        result = subprocess.run(
+        result = gcloud_run(
             ["gcloud", "services", "list", "--enabled",
              "--filter=config.name:searchconsole.googleapis.com",
              "--format=value(config.name)"],
@@ -142,7 +144,7 @@ def check_search_console_api():
 
     # API not enabled — try to enable it automatically
     print("Search Console API is not enabled. Enabling it now...", file=sys.stderr)
-    enable_result = subprocess.run(
+    enable_result = gcloud_run(
         ["gcloud", "services", "enable", "searchconsole.googleapis.com"],
         capture_output=True, text=True, timeout=60,
     )
@@ -196,7 +198,7 @@ def check_adc_credentials():
     the correct scopes.
     """
     try:
-        result = subprocess.run(
+        result = gcloud_run(
             ["gcloud", "auth", "application-default", "print-access-token"],
             capture_output=True, text=True, timeout=15,
         )
@@ -234,7 +236,7 @@ def check_adc_credentials():
     print("Opening browser for Google authentication...", file=sys.stderr)
     print("(Log in with the Google account that has access to Search Console.)", file=sys.stderr)
     print("", file=sys.stderr)
-    auth_result = subprocess.run(
+    auth_result = gcloud_run(
         ["gcloud", "auth", "application-default", "login",
          f"--scopes={_GSC_SCOPES_ARG}"],
     )
@@ -280,7 +282,7 @@ def check_quota_project():
 
     # Look up the active gcloud project
     try:
-        result = subprocess.run(
+        result = gcloud_run(
             ["gcloud", "config", "get-value", "project"],
             capture_output=True, text=True, timeout=15,
         )
@@ -296,7 +298,7 @@ def check_quota_project():
 
     print(f"Setting ADC quota project to '{project}'...", file=sys.stderr)
     try:
-        set_result = subprocess.run(
+        set_result = gcloud_run(
             ["gcloud", "auth", "application-default", "set-quota-project", project],
             capture_output=True, text=True, timeout=30,
         )
@@ -320,7 +322,7 @@ def check_pagespeed_api():
     """Ensure the PageSpeed Insights API is enabled in the active project.
     Non-fatal — PageSpeed is optional but recommended."""
     try:
-        result = subprocess.run(
+        result = gcloud_run(
             ["gcloud", "services", "list", "--enabled",
              "--filter=config.name:pagespeedonline.googleapis.com",
              "--format=value(config.name)"],
@@ -341,7 +343,7 @@ def check_pagespeed_api():
 
     print("PageSpeed Insights API is not enabled. Enabling it now...", file=sys.stderr)
     try:
-        enable_result = subprocess.run(
+        enable_result = gcloud_run(
             ["gcloud", "services", "enable", "pagespeedonline.googleapis.com"],
             capture_output=True, text=True, timeout=60,
         )
