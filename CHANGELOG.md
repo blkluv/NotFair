@@ -11,6 +11,46 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.21.0] — 2026-05-15
+
+### Added — `/content-planner` skill + local calendar viewer
+- **New skill: `seo/content-planner`.** A GSC-driven content calendar. Pulls
+  90 days of Search Console query × page data, classifies every (query, page)
+  row into one of five buckets (striking-distance positions 5–20,
+  unanswered-intent gaps, CTR underperformers, related-keyword expansions, and
+  cannibalization warnings), computes a click-potential score per topic
+  (`projectedImpressions × (targetCtrAtPosition3 − currentCtr)`), and writes
+  a dated, prioritized calendar to `{data_dir}/content-calendar.json`.
+  Refuses to ship the calendar when GSC isn't connected, when there's < 50
+  rows of data to reason about, or when two scheduled topics share a primary
+  keyword. Hands off to `/content-writer`, `/meta-tags-optimizer`, and
+  `/seo-analysis` based on bucket.
+- **New binary: `bin/toprank-content-calendar`.** Stdlib-only Python HTTP
+  server that reads `content-calendar.json` and renders a read-only calendar
+  view on `localhost:8323` (configurable). Auto-discovers the calendar at
+  `./.notfair/content-calendar.json` then `~/.notfair/content-calendar.json`,
+  falls forward through the next 9 ports if the default is in use, exits
+  cleanly on Ctrl+C. No pip install, no framework, no auth — loopback-only.
+- **Methodology reference: `seo/content-planner/references/planning-methodology.md`.**
+  Codifies the CTR-by-position curve, the five-bucket classification rubric,
+  the click-potential formula with seasonality factors, scheduling rules
+  (one post per week by default, P0s first, refreshes parallel to new posts),
+  and explicit failure modes (calendar padding, intent mismatch, treating GSC
+  impressions as third-party volume).
+
+### Changed — boundary cleanup against `/keyword-research`
+- `/keyword-research` description now scopes it explicitly to seed-driven
+  keyword discovery and points users at `/content-planner` for editorial
+  calendars built from their own GSC data. AGENTS.md row updated to match.
+
+### Notes
+- The calendar viewer is read-only by design — editing happens in the JSON
+  file, the viewer re-reads on every request. Loop: edit JSON → reload page.
+- The viewer auto-opens the browser on macOS/Windows and on Linux with
+  `$DISPLAY` set; pass `--no-open` to disable.
+
+---
+
 ## [0.20.0] — 2026-05-15
 
 ### Changed — `/content-writer` blog-post bar raised
