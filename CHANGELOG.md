@@ -11,6 +11,61 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.22.0] — 2026-05-15
+
+### Added — opt-in OpenClaw cron publisher
+
+- **`openclaw/bin/publish_pending.py`** — stdlib Python publisher. Reads
+  `content-calendar.json`, finds entries with `status: "ready_to_publish"`
+  and a `bodyPath`, POSTs each to `$NOTFAIR_PUBLISH_URL` (default:
+  `https://notfair.co/api/blog/publish`) with `Authorization: Bearer
+  $NOTFAIR_PUBLISH_TOKEN`. Dry-run by default — needs `--commit` (or
+  `OPENCLAW_PUBLISH_COMMIT=1`) to actually fire. Response handling:
+  2xx → `published` with stored URL; 4xx → `failed` (non-retryable);
+  5xx / network error → entry stays `ready_to_publish`, exits non-zero so
+  the next cron pass retries.
+- **`openclaw/install/install-openclaw-cron.sh --enable-publisher`** — new
+  opt-in flag that registers a recurring `Toprank NotFair Publisher` cron
+  job via `openclaw cron add`. Default interval: 15m (override with
+  `--publisher-every`). Existing installs are unaffected — without the
+  flag, the publisher is not registered.
+- **`openclaw/install/notfair-publisher.md`** — webhook contract for the
+  Next.js side: endpoint, auth, request payload shape, expected
+  responses, idempotency, status-code semantics, versioning. Single source
+  of truth — keep `publish_pending.py` and the Next.js handler in lockstep
+  via this doc.
+- **`seo/content-planner/SKILL.md`** — schema now documents
+  `ready_to_publish` / `published` / `failed` statuses and `bodyPath`,
+  `featuredImage`, `inlineImages`, `structuredData`, `metaDescription`
+  fields. Includes a status-lifecycle table. The planner never
+  auto-promotes — the hand-flip to `ready_to_publish` is the user's
+  explicit go-ahead.
+- **15 unit tests** (`openclaw/tests/test_publish_pending.py`) covering
+  missing calendar, no ready entries, missing token, dry-run, 2xx /
+  4xx / 5xx / network, missing body file, multiple entries, site filter,
+  payload shape, and CLI/env-var precedence.
+
+### Changed — opt-in carve-out, not policy flip
+
+- **`openclaw/README.md`** "What it is not" — narrowed from "not a
+  production auto-publisher" (absolute) to "not an auto-publisher by
+  default" (opt-in carve-out). Existing installs stay read-only /
+  advisory; users explicitly opt in with `--enable-publisher`.
+
+### Notes — what's intentionally NOT here
+
+- No dependency on `gbrain` (Garry Tan's open-source memory/scheduler
+  runtime). It's a real and capable project, but for a stateless
+  POST-on-a-timer the marginal value over `openclaw cron` is zero and the
+  dependency surface is large. The publisher is runtime-agnostic stdlib
+  Python — if someone later wants to drive it from gbrain or plain
+  crontab, they wire up a one-line shell job pointing at
+  `publish_pending.py`.
+- No HMAC signing in v1. Add `X-NotFair-Signature` and bump
+  `schemaVersion` if needed.
+
+---
+
 ## [0.21.0] — 2026-05-15
 
 ### Added — `/content-planner` skill + local calendar viewer

@@ -146,9 +146,29 @@ Schedule one post per week, P0s first. Format every entry against this schema:
   },
   "rationale": "<one sentence: why this topic, why now>",
   "writerPrompt": "<the exact prompt to paste into /content-writer when it's time to write>",
-  "refreshTarget": "<URL of existing page, only set when type=refresh>"
+  "refreshTarget": "<URL of existing page, only set when type=refresh>",
+  "bodyPath": "<relative path to written markdown body, set after /content-writer runs>",
+  "metaDescription": "<set after /content-writer runs>",
+  "featuredImage": { "url": "...", "alt": "..." },
+  "inlineImages": [{ "url": "...", "alt": "...", "placement": "..." }],
+  "structuredData": { "@context": "https://schema.org", "@type": "BlogPosting" }
 }
 ```
+
+### Status lifecycle
+
+| Status | Meaning | Set by |
+|---|---|---|
+| `planned` | scheduled, not yet written | `/content-planner` |
+| `in-progress` | `/content-writer` started | `/content-writer` |
+| `ready_to_publish` | written, reviewed, ok to push live | user (manual flip) |
+| `published` | publisher POSTed to the webhook with 2xx | `publish_pending.py` |
+| `failed` | publisher got 4xx; needs user fix | `publish_pending.py` |
+
+The publisher (`openclaw/bin/publish_pending.py`, opt-in via OpenClaw cron)
+only picks up entries with `status === "ready_to_publish"` AND a non-empty
+`bodyPath`. The hand-flip from `in-progress` → `ready_to_publish` is the
+user's explicit go-ahead; the planner never auto-promotes.
 
 Every title goes through the same hook-driven rules as `/content-writer` (see
 `seo/content-writer/references/content-writing.md` → "Title Hook Patterns").
