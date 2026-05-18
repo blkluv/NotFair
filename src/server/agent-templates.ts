@@ -2,6 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { openclaw } from "@/server/openclaw/cli";
+import { writeAgentMeta } from "@/server/agent-meta";
 
 /**
  * Embedded in every agent's system prompt so the agent knows how to create
@@ -195,6 +196,16 @@ export async function ensureProjectAgents(project_slug: string): Promise<{
       // Idempotently refresh the IDENTITY.md so prompt edits propagate to
       // existing agents without forcing the user to delete + recreate.
       await writeIdentityFile(workspaceAbs, template);
+      // Backfill the notfair meta sidecar in case this agent was created
+      // before we started writing it (so the sidebar still finds them).
+      await writeAgentMeta({
+        agent_id: name,
+        project_slug,
+        slug: urlSlugForTemplate(template.key),
+        display_name: template.display_name,
+        template_key: template.key,
+        created_at: new Date().toISOString(),
+      });
       existed.push(name);
       continue;
     }
@@ -215,6 +226,14 @@ export async function ensureProjectAgents(project_slug: string): Promise<{
         workspaceAbs,
       ]);
       await writeIdentityFile(workspaceAbs, template);
+      await writeAgentMeta({
+        agent_id: name,
+        project_slug,
+        slug: urlSlugForTemplate(template.key),
+        display_name: template.display_name,
+        template_key: template.key,
+        created_at: new Date().toISOString(),
+      });
       created.push(name);
     } catch (err) {
       // Surface but don't crash the loop; partial provisioning recoverable on retry.

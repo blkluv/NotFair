@@ -1,13 +1,33 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { getActiveProject } from "@/server/active-project";
 import { listCronsForProject } from "@/server/openclaw/crons";
-import { expandSchedule } from "@/server/openclaw/cron-schedule";
+import {
+  annotateOccurrencesWithRunStatus,
+  expandSchedule,
+} from "@/server/openclaw/cron-schedule";
 import { ScheduleCronDialog } from "@/components/schedule-cron-dialog";
 import {
   CronCalendar,
   type CalendarCron,
   type CalendarOccurrence,
 } from "@/components/cron-calendar";
+import type { ScheduleInput } from "@/server/actions/cron-runs";
+
+function scheduleForCalendar(s: unknown): ScheduleInput | null {
+  if (!s || typeof s !== "object") return null;
+  const obj = s as { kind?: string; expr?: unknown; tz?: unknown; everyMs?: unknown; anchorMs?: unknown };
+  if (obj.kind === "cron" && typeof obj.expr === "string") {
+    return { kind: "cron", expr: obj.expr, ...(typeof obj.tz === "string" ? { tz: obj.tz } : {}) };
+  }
+  if (obj.kind === "every" && typeof obj.everyMs === "number") {
+    return {
+      kind: "every",
+      everyMs: obj.everyMs,
+      ...(typeof obj.anchorMs === "number" ? { anchorMs: obj.anchorMs } : {}),
+    };
+  }
+  return null;
+}
 
 const NUM_DAYS = 14; // 2-week window; UI shows 7 at a time with prev/next.
 
@@ -43,12 +63,12 @@ export default async function CronsPage() {
 
   // Expand every cron into occurrences within the window.
   const occurrences: CalendarOccurrence[] = [];
+  const schedulesByCronId = new Map<string, ReturnType<typeof scheduleForCalendar>>();
   for (const cron of allCrons) {
-    if (cron.disabled) continue;
     const occs = expandSchedule(
       cron.id,
       cron.schedule_raw,
-      { from: Date.now(), until },
+      { from: startOfFirstDay, until },
       {
         name: cron.name,
         short_name: cron.short_name,
@@ -57,8 +77,13 @@ export default async function CronsPage() {
         schedule_text: cron.schedule_text,
       },
     );
-    for (const o of occs) occurrences.push(o);
+    for (const o of occs) occurrences.push({ ...o, cron_disabled: cron.disabled });
+    schedulesByCronId.set(cron.id, scheduleForCalendar(cron.schedule_raw));
   }
+  annotateOccurrencesWithRunStatus(
+    occurrences,
+    new Map([...schedulesByCronId.entries()].map(([k, v]) => [k, v ?? undefined])),
+  );
 
   const cronsById: Record<string, CalendarCron> = {};
   for (const cron of allCrons) {
@@ -71,6 +96,12 @@ export default async function CronsPage() {
       schedule_text: cron.schedule_text,
       disabled: cron.disabled,
       status_text: cron.status_text,
+      message: cron.message,
+      description: cron.description,
+      last_run_at_ms: cron.last_run_at_ms,
+      last_status: cron.last_status,
+      last_error: cron.last_error,
+      schedule_raw: scheduleForCalendar(cron.schedule_raw),
     };
   }
 
@@ -84,7 +115,7 @@ export default async function CronsPage() {
           <h1 className="text-2xl font-semibold tracking-tight">Crons</h1>
           <p className="text-sm text-muted-foreground">
             Project <span className="font-mono">{project.slug}</span> ·{" "}
-            {totalActive} active{totalDisabled > 0 ? ` · ${totalDisabled} paused` : ""} ·{" "}
+            {totalActive} active{totalDisabled > 0 ? ` · ${totalDisabled} disabled` : ""} ·{" "}
             backed by OpenClaw
           </p>
         </div>

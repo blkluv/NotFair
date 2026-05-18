@@ -80,7 +80,7 @@ export default async function AgentsPage() {
                     </Link>
                   )}
                   <Button asChild size="sm">
-                    <Link href={`/chat/${slug}`}>
+                    <Link href={`/agents/${slug}/chat`}>
                       <MessageSquare className="mr-1.5 size-4" />
                       Chat
                     </Link>

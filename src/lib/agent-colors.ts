@@ -32,17 +32,73 @@ const PALETTE: Record<AgentTemplateKey, AgentColor> = {
   },
 };
 
-const FALLBACK: AgentColor = {
-  chip: "bg-zinc-100 text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100 border-zinc-200/60 dark:border-zinc-800",
-  dot: "bg-zinc-500",
-  label: "text-zinc-700 dark:text-zinc-300",
-};
+/**
+ * Extra palette used for custom or cloned agents (anything not in TEMPLATES).
+ * Each entry is intentionally vivid — zinc/neutral would read as "disabled"
+ * against the rest of the UI. Hue-hashing the slug below keeps the mapping
+ * stable across renders without needing a DB.
+ */
+const EXTRA_PALETTE: AgentColor[] = [
+  {
+    chip: "bg-violet-100 text-violet-900 dark:bg-violet-950 dark:text-violet-100 border-violet-200/60 dark:border-violet-900",
+    dot: "bg-violet-500",
+    label: "text-violet-700 dark:text-violet-300",
+  },
+  {
+    chip: "bg-rose-100 text-rose-900 dark:bg-rose-950 dark:text-rose-100 border-rose-200/60 dark:border-rose-900",
+    dot: "bg-rose-500",
+    label: "text-rose-700 dark:text-rose-300",
+  },
+  {
+    chip: "bg-cyan-100 text-cyan-900 dark:bg-cyan-950 dark:text-cyan-100 border-cyan-200/60 dark:border-cyan-900",
+    dot: "bg-cyan-500",
+    label: "text-cyan-700 dark:text-cyan-300",
+  },
+  {
+    chip: "bg-fuchsia-100 text-fuchsia-900 dark:bg-fuchsia-950 dark:text-fuchsia-100 border-fuchsia-200/60 dark:border-fuchsia-900",
+    dot: "bg-fuchsia-500",
+    label: "text-fuchsia-700 dark:text-fuchsia-300",
+  },
+  {
+    chip: "bg-teal-100 text-teal-900 dark:bg-teal-950 dark:text-teal-100 border-teal-200/60 dark:border-teal-900",
+    dot: "bg-teal-500",
+    label: "text-teal-700 dark:text-teal-300",
+  },
+  {
+    chip: "bg-orange-100 text-orange-900 dark:bg-orange-950 dark:text-orange-100 border-orange-200/60 dark:border-orange-900",
+    dot: "bg-orange-500",
+    label: "text-orange-700 dark:text-orange-300",
+  },
+  {
+    chip: "bg-indigo-100 text-indigo-900 dark:bg-indigo-950 dark:text-indigo-100 border-indigo-200/60 dark:border-indigo-900",
+    dot: "bg-indigo-500",
+    label: "text-indigo-700 dark:text-indigo-300",
+  },
+  {
+    chip: "bg-lime-100 text-lime-900 dark:bg-lime-950 dark:text-lime-100 border-lime-200/60 dark:border-lime-900",
+    dot: "bg-lime-500",
+    label: "text-lime-700 dark:text-lime-300",
+  },
+];
+
+/** Fast deterministic hash (djb2) so a slug always maps to the same color. */
+function hashSlug(slug: string): number {
+  let h = 5381;
+  for (let i = 0; i < slug.length; i++) {
+    h = ((h << 5) + h + slug.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h);
+}
 
 /**
  * Resolve a color for an agent slug as it appears in our cron view.
- * Accepts both URL slugs ("google-ads") and template keys ("google_ads").
+ * Templates (cmo / google-ads / seo) get their reserved hue. Anything else
+ * gets a stable color from the extras palette via slug hash — never the
+ * zinc fallback, which reads as "disabled".
  */
 export function colorForAgentSlug(slug: string): AgentColor {
   const normalized = slug.replace(/-/g, "_") as AgentTemplateKey;
-  return PALETTE[normalized] ?? FALLBACK;
+  const fromTemplate = PALETTE[normalized];
+  if (fromTemplate) return fromTemplate;
+  return EXTRA_PALETTE[hashSlug(slug) % EXTRA_PALETTE.length]!;
 }

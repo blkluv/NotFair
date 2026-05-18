@@ -1,7 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createCron, disableCron, enableCron, removeCron } from "@/server/openclaw/crons";
+import {
+  createCron,
+  disableCron,
+  enableCron,
+  invalidateCronCache,
+  removeCron,
+} from "@/server/openclaw/crons";
+import { updateCronMessage } from "@/server/openclaw/gateway-rpc";
 import { agentNameFor, type AgentTemplate } from "@/server/agent-templates";
 import { slugify } from "@/lib/slug";
 import { logAgentAction } from "@/server/db/agent-actions";
@@ -84,6 +91,22 @@ export async function deleteCronAction(id: string): Promise<{ ok: boolean; error
   try {
     await removeCron(id);
     revalidatePath("/crons");
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function updateCronPromptAction(
+  id: string,
+  message: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const trimmed = message.trim();
+  if (!trimmed) return { ok: false, error: "Prompt cannot be empty." };
+  try {
+    await updateCronMessage(id, trimmed);
+    invalidateCronCache();
+    revalidatePath("/", "layout");
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };

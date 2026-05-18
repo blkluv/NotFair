@@ -24,6 +24,13 @@ export type OpenClawSession = {
   sessionId: string;
   /** Optional short label parsed from the full session-key, if present. */
   label: string;
+  /**
+   * Full sessionKey OpenClaw uses internally (`agent:<agent>:<label>`). The
+   * label half is the canonical identifier for an existing thread — OpenClaw
+   * may register `<main>` for its bootstrap thread instead of the sessionId.
+   * For brand-new threads we create, the label IS the sessionId UUID.
+   */
+  sessionKey: string;
   /** Last interaction (ms epoch). 0 if unknown / freshly minted. */
   lastInteractionAt: number;
   /** True if this session exists only in our cookie (user clicked New, hasn't sent a message yet). */
@@ -57,12 +64,34 @@ export function listSessionsForAgent(agentFullId: string): OpenClawSession[] {
     out.push({
       sessionId: entry.sessionId,
       label,
+      sessionKey: key,
       lastInteractionAt: entry.lastInteractionAt ?? entry.updatedAt ?? 0,
       pending: false,
     });
   }
   out.sort((a, b) => b.lastInteractionAt - a.lastInteractionAt);
   return out;
+}
+
+/**
+ * Build the canonical sessionKey for a brand-new thread we're about to send
+ * the first message to. Label = the same UUID we're using as sessionId, so
+ * the thread becomes self-identifying in OpenClaw's store.
+ */
+export function buildPendingSessionKey(agentFullId: string, sessionId: string): string {
+  return `agent:${agentFullId}:${sessionId}`;
+}
+
+/**
+ * Look up an existing session by its sessionId (UUID), returning the entry
+ * with its OpenClaw-registered sessionKey. Returns null when the sessionId is
+ * not yet known to OpenClaw — caller should treat it as a pending new thread.
+ */
+export function findSessionBySessionId(
+  agentFullId: string,
+  sessionId: string,
+): OpenClawSession | null {
+  return listSessionsForAgent(agentFullId).find((s) => s.sessionId === sessionId) ?? null;
 }
 
 /** Generate a brand-new session id. OpenClaw creates the entry on first turn. */
@@ -99,6 +128,7 @@ export async function getSessionsView(
       active = {
         sessionId: cookieSessionId,
         label: cookieSessionId.slice(0, 8),
+        sessionKey: buildPendingSessionKey(agentFullId, cookieSessionId),
         lastInteractionAt: 0,
         pending: true,
       };
@@ -111,9 +141,11 @@ export async function getSessionsView(
     } else {
       // No history yet — synthesize a default session id. Cookie will be set
       // when the user sends their first message.
+      const newId = newSessionId();
       active = {
-        sessionId: newSessionId(),
+        sessionId: newId,
         label: "main",
+        sessionKey: buildPendingSessionKey(agentFullId, newId),
         lastInteractionAt: 0,
         pending: true,
       };

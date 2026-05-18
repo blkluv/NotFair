@@ -12,12 +12,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { toast } from "sonner";
-import { newSessionAction, switchSessionAction } from "@/server/actions/sessions";
 
 export type SessionLite = {
   sessionId: string;
   label: string;
+  sessionKey: string;
   lastInteractionAt: number;
   pending: boolean;
 };
@@ -48,27 +47,14 @@ export function ThreadSelector({ agentSlug, sessions, activeSessionId }: Props) 
   const [pending, start] = useTransition();
   const active = sessions.find((s) => s.sessionId === activeSessionId);
 
-  function newThread() {
-    start(async () => {
-      const r = await newSessionAction(agentSlug);
-      if (!r.ok) {
-        toast.error(r.error);
-        return;
-      }
-      router.refresh();
-    });
+  function go(sessionId: string) {
+    if (sessionId === activeSessionId) return;
+    start(() => router.push(`/agents/${agentSlug}/chat/${sessionId}`));
   }
 
-  function switchTo(sessionId: string) {
-    if (sessionId === activeSessionId) return;
-    start(async () => {
-      const r = await switchSessionAction(agentSlug, sessionId);
-      if (!r.ok) {
-        toast.error(r.error);
-        return;
-      }
-      router.refresh();
-    });
+  function newThread() {
+    const id = crypto.randomUUID();
+    start(() => router.push(`/agents/${agentSlug}/chat/${id}`));
   }
 
   return (
@@ -101,7 +87,7 @@ export function ThreadSelector({ agentSlug, sessions, activeSessionId }: Props) 
               key={s.sessionId}
               onSelect={(e) => {
                 e.preventDefault();
-                switchTo(s.sessionId);
+                go(s.sessionId);
               }}
               className="flex items-center gap-2"
             >

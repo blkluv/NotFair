@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { getActiveProject } from "@/server/active-project";
 import { getGuardrails } from "@/server/db/guardrails";
 import { updateGuardrailsAction } from "@/server/actions/guardrails";
+import { DangerZone } from "@/components/danger-zone";
+import { ProjectRenameCard } from "@/components/project-rename-card";
 
 export default async function SettingsPage() {
   const project = await getActiveProject();
@@ -88,6 +90,18 @@ export default async function SettingsPage() {
           </form>
         </CardContent>
       </Card>
+
+      <ProjectRenameCard
+        currentSlug={project.slug}
+        currentDisplayName={project.display_name}
+      />
+
+      <section className="space-y-2 pt-4">
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Danger zone
+        </h2>
+        <DangerZone projectSlug={project.slug} projectName={project.display_name} />
+      </section>
     </div>
   );
 }

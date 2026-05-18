@@ -58,6 +58,85 @@ export function renameProject(slug: string, display_name: string): Project | nul
   return getProject(slug);
 }
 
+/**
+ * Migrate every DB row keyed off `project_slug` from `old` to `new`. Wraps
+ * the updates in a transaction with `defer_foreign_keys=ON` so the
+ * referential checks happen at COMMIT instead of per-row — required because
+ * our FKs reference `projects(slug)` without `ON UPDATE CASCADE`.
+ *
+ * Returns the renamed project, or null when the old slug doesn't exist.
+ */
+export function changeProjectSlug(
+  old_slug: string,
+  new_slug: string,
+  new_display_name?: string,
+): Project | null {
+  const db = getDb();
+  if (old_slug === new_slug) {
+    if (new_display_name) {
+      db.prepare("UPDATE projects SET display_name = ? WHERE slug = ?").run(
+        new_display_name.trim(),
+        old_slug,
+      );
+    }
+    return getProject(old_slug);
+  }
+  // Bail if the source doesn't exist or the destination already exists.
+  if (!db.prepare("SELECT 1 FROM projects WHERE slug = ?").get(old_slug)) {
+    return null;
+  }
+  if (db.prepare("SELECT 1 FROM projects WHERE slug = ?").get(new_slug)) {
+    throw new Error(`Project slug '${new_slug}' already exists`);
+  }
+
+  const childTables = [
+    "tasks",
+    "approvals",
+    "cost_events",
+    "oauth_tokens",
+    "guardrails",
+    "agent_actions",
+    "sequence_runs",
+  ];
+
+  // Disable FK enforcement for the duration of the rename. Our FKs reference
+  // `projects(slug)` without ON UPDATE CASCADE, so updating the PK while
+  // child rows still point at the old value would violate. `defer_foreign_keys`
+  // inside a wrapped transaction doesn't take effect reliably across SQLite
+  // releases; toggling `foreign_keys` is universally supported and works the
+  // same way every popular SQLite migration tool uses.
+  const fkWasOn = db.pragma("foreign_keys = OFF", { simple: true });
+  try {
+    const tx = db.transaction(() => {
+      for (const table of childTables) {
+        try {
+          db.prepare(`UPDATE ${table} SET project_slug = ? WHERE project_slug = ?`).run(
+            new_slug,
+            old_slug,
+          );
+        } catch {
+          // table missing on this install; skip.
+        }
+      }
+      if (new_display_name) {
+        db.prepare("UPDATE projects SET slug = ?, display_name = ? WHERE slug = ?").run(
+          new_slug,
+          new_display_name.trim(),
+          old_slug,
+        );
+      } else {
+        db.prepare("UPDATE projects SET slug = ? WHERE slug = ?").run(new_slug, old_slug);
+      }
+    });
+    tx();
+  } finally {
+    // Restore prior FK state (1 if it was on, 0 if it was already off).
+    db.pragma(`foreign_keys = ${fkWasOn === 0 ? "OFF" : "ON"}`);
+  }
+
+  return getProject(new_slug);
+}
+
 export function archiveProject(slug: string): Project | null {
   const db = getDb();
   const now = new Date().toISOString();
@@ -69,4 +148,28 @@ export function unarchiveProject(slug: string): Project | null {
   const db = getDb();
   db.prepare("UPDATE projects SET archived_at = NULL WHERE slug = ?").run(slug);
   return getProject(slug);
+}
+
+/**
+ * Hard-delete a project row plus any rows in tables that key off project_slug
+ * (guardrails, approvals, agent_actions, etc.). OpenClaw-side state — agents,
+ * sessions, crons — is cleaned up by the deleteProject orchestrator, not here.
+ */
+export function deleteProjectRow(slug: string): void {
+  const db = getDb();
+  const childTables = [
+    "guardrails",
+    "approvals",
+    "agent_actions",
+    "cost_snapshots",
+    "connections",
+  ];
+  for (const table of childTables) {
+    try {
+      db.prepare(`DELETE FROM ${table} WHERE project_slug = ?`).run(slug);
+    } catch {
+      // table missing on this install; skip.
+    }
+  }
+  db.prepare("DELETE FROM projects WHERE slug = ?").run(slug);
 }

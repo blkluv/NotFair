@@ -13,7 +13,6 @@ import {
   type SlashCommand,
 } from "@/lib/slash-commands";
 import { SlashCommandPopover } from "./slash-command-popover";
-import { newSessionAction } from "@/server/actions/sessions";
 
 type Message = {
   id: string;
@@ -32,6 +31,12 @@ type Props = {
   agentSlug: string;
   agentDisplayName: string;
   sessionId: string;
+  /**
+   * OpenClaw's canonical `agent:<agent>:<label>` key for this thread. For
+   * existing threads, label might be `main` (not the sessionId UUID), so we
+   * thread the resolved key through instead of reconstructing it server-side.
+   */
+  sessionKey: string;
   initialMessages?: InitialMessage[];
 };
 
@@ -40,6 +45,7 @@ export function AgentChat({
   agentSlug,
   agentDisplayName,
   sessionId,
+  sessionKey,
   initialMessages = [],
 }: Props) {
   const [messages, setMessages] = useState<Message[]>(initialMessages);
@@ -115,15 +121,15 @@ export function AgentChat({
           case "clear":
             setMessages([]);
             return;
-          case "new-session":
-            // Create a fresh OpenClaw session id via server action, then refresh
-            // the route so the page re-loads with empty history.
-            startTransition(async () => {
-              const r = await newSessionAction(agentSlug);
-              if (!r.ok) toast.error(r.error);
-              else router.refresh();
+          case "new-session": {
+            // Mint a fresh UUID and navigate — the new threaded URL becomes
+            // the source of truth, no cookie roundtrip needed.
+            const newId = crypto.randomUUID();
+            startTransition(() => {
+              router.push(`/agents/${agentSlug}/chat/${newId}`);
             });
             return;
+          }
           case "stop":
             if (abortRef.current) abortRef.current.abort();
             return;
@@ -156,7 +162,7 @@ export function AgentChat({
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, agent: agentSlug, sessionId }),
+        body: JSON.stringify({ message: text, agent: agentSlug, sessionId, sessionKey }),
         signal: ctrl.signal,
       });
       if (!res.ok || !res.body) {

@@ -1,5 +1,10 @@
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { cache } from "react";
 import { openclaw } from "./cli";
+
+const OPENCLAW_HOME = process.env.OPENCLAW_HOME ?? join(homedir(), ".openclaw");
 
 /**
  * Module-level in-memory cache for the `openclaw cron list` subprocess.
@@ -20,7 +25,9 @@ async function rawListAllCrons(): Promise<unknown> {
     return cachedCronsPromise;
   }
   cachedCronsAt = now;
-  cachedCronsPromise = openclaw(["cron", "list"]).catch((err) => {
+  // `--all` because the CLI defaults to enabled-only and we want disabled
+  // crons in the calendar too (so the Disabled filter has something to show).
+  cachedCronsPromise = openclaw(["cron", "list", "--all"]).catch((err) => {
     // Invalidate on failure so the next caller retries instead of getting a cached reject.
     cachedCronsAt = 0;
     cachedCronsPromise = null;
@@ -43,6 +50,9 @@ type CronState = {
   nextRunAtMs?: number;
   lastRunAtMs?: number;
   lastStatus?: string;
+  lastRunStatus?: string;
+  lastError?: string;
+  lastErrorReason?: string;
   runs?: number;
 };
 
@@ -54,6 +64,8 @@ export type OpenClawCron = {
   schedule?: CronSchedule;
   state?: CronState;
   disabled?: boolean;
+  enabled?: boolean;
+  payload?: { kind?: string; message?: string; timeoutSeconds?: number };
   // Catch any other fields without losing them.
   [k: string]: unknown;
 };
@@ -71,6 +83,15 @@ export type DisplayCron = {
   last_run_text: string;
   status_text: string;
   disabled: boolean;
+  /** The prompt/message the cron sends to the agent on each tick. */
+  message?: string;
+  description?: string;
+  /** Last execution time (ms epoch); used to align "ran" vs "scheduled" per occurrence. */
+  last_run_at_ms?: number;
+  /** Raw status string from OpenClaw (e.g. "ok", "error", "skipped"). */
+  last_status?: string;
+  last_error?: string;
+  next_run_at_ms?: number;
 };
 
 export type CronGroup = {
@@ -128,9 +149,9 @@ export const listCronsForProject = cache(async (project_slug: string): Promise<P
 
 function toDisplay(cron: OpenClawCron, shortAgent: string, _project_slug: string): DisplayCron {
   const agent_id = cron.agentId ?? "unknown";
-  const status = cron.disabled
-    ? "disabled"
-    : (cron.state?.lastStatus as string | undefined) ?? "idle";
+  const disabled = !!cron.disabled || cron.enabled === false;
+  const rawStatus = cron.state?.lastStatus ?? cron.state?.lastRunStatus;
+  const status_text = disabled ? "disabled" : rawStatus ?? "idle";
   return {
     id: cron.id,
     name: cron.name,
@@ -141,8 +162,14 @@ function toDisplay(cron: OpenClawCron, shortAgent: string, _project_slug: string
     schedule_text: formatSchedule(cron.schedule),
     next_run_text: formatRelativeMs(cron.state?.nextRunAtMs),
     last_run_text: formatRelativeMs(cron.state?.lastRunAtMs),
-    status_text: status,
-    disabled: !!cron.disabled,
+    status_text,
+    disabled,
+    message: cron.payload?.message,
+    description: cron.description,
+    last_run_at_ms: cron.state?.lastRunAtMs,
+    last_status: rawStatus,
+    last_error: cron.state?.lastError ?? cron.state?.lastErrorReason,
+    next_run_at_ms: cron.state?.nextRunAtMs,
   };
 }
 
@@ -253,8 +280,74 @@ export type CreateCronResult = {
  * Create a cron in OpenClaw using our naming convention.
  * Called by the `schedule_recurring_work` MCP tool from specialist agents.
  */
+// --- Per-run history ---
+
+export type CronRun = {
+  /** When the run was scheduled to fire (matches calendar occurrence.at within ~seconds). */
+  run_at_ms: number;
+  /** When the run finished (ts in the JSONL). */
+  finished_at_ms: number;
+  /** Raw OpenClaw status: "ok" | "error" | "skipped" | etc. */
+  status: string;
+  /** Agent's final reply / report. Empty when missing (e.g. crashed runs). */
+  summary: string;
+  /** Failure detail string, when status="error". */
+  error?: string;
+  duration_ms?: number;
+  session_id?: string;
+  model?: string;
+  provider?: string;
+  usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number };
+};
+
+/**
+ * Read the per-job cron run log. Returns the most recent runs (newest first).
+ * The file is JSONL with one entry per finished run, persisted by OpenClaw's
+ * cron service under `~/.openclaw/cron/runs/<jobId>.jsonl`.
+ */
+export function loadCronRuns(cron_id: string, limit = 100): CronRun[] {
+  const path = join(OPENCLAW_HOME, "cron", "runs", `${cron_id}.jsonl`);
+  if (!existsSync(path)) return [];
+  let raw: string;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch {
+    return [];
+  }
+  const lines = raw.split("\n").filter((l) => l.trim().length > 0);
+  // Iterate newest-last → flip + cap.
+  const out: CronRun[] = [];
+  for (let i = lines.length - 1; i >= 0 && out.length < limit; i--) {
+    let entry: Record<string, unknown>;
+    try {
+      entry = JSON.parse(lines[i]!) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    if (entry.action !== "finished") continue;
+    const run_at_ms = typeof entry.runAtMs === "number" ? entry.runAtMs : 0;
+    if (!run_at_ms) continue;
+    out.push({
+      run_at_ms,
+      finished_at_ms: typeof entry.ts === "number" ? entry.ts : run_at_ms,
+      status: typeof entry.status === "string" ? entry.status : "unknown",
+      summary: typeof entry.summary === "string" ? entry.summary : "",
+      error: typeof entry.error === "string" ? entry.error : undefined,
+      duration_ms: typeof entry.durationMs === "number" ? entry.durationMs : undefined,
+      session_id: typeof entry.sessionId === "string" ? entry.sessionId : undefined,
+      model: typeof entry.model === "string" ? entry.model : undefined,
+      provider: typeof entry.provider === "string" ? entry.provider : undefined,
+      usage:
+        entry.usage && typeof entry.usage === "object"
+          ? (entry.usage as CronRun["usage"])
+          : undefined,
+    });
+  }
+  return out;
+}
+
 export async function createCron(input: CreateCronInput): Promise<CreateCronResult> {
-  const fullName = `${input.project_slug} ${NAME_SEPARATOR} ${input.agent_slug} ${NAME_SEPARATOR} ${input.cron_name}`;
+  const fullName = `${input.project_slug}${NAME_SEPARATOR}${input.agent_slug}${NAME_SEPARATOR}${input.cron_name}`;
   const args = [
     "cron",
     "add",

@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
 import { getActiveProject } from "@/server/active-project";
+import { resolveAgentBySlug } from "@/server/agent-meta";
+import { streamChatViaGateway } from "@/server/openclaw/gateway-client";
 import {
-  agentNameFor,
-  templateForUrlSlug,
-  type AgentTemplateKey,
-} from "@/server/agent-templates";
-import { streamAgentTurn } from "@/server/openclaw/agent-turn";
-import { getSessionsView, setActiveSession } from "@/server/openclaw/sessions";
+  buildPendingSessionKey,
+  findSessionBySessionId,
+} from "@/server/openclaw/sessions";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -14,8 +13,15 @@ export const runtime = "nodejs";
 type ChatPostBody = {
   message: string;
   agent?: string;
-  /** Optional explicit OpenClaw session id (UUID). Defaults to the active one. */
+  /** OpenClaw session UUID — used for trajectory file naming. */
   sessionId?: string;
+  /**
+   * OpenClaw's canonical `agent:<agent>:<label>` key for this thread. When the
+   * client knows the right key (e.g., `agent:foo:main` for an existing thread
+   * whose label is not the sessionId), pass it here. Falls back to a
+   * sessionId-derived key for brand-new threads.
+   */
+  sessionKey?: string;
 };
 
 export async function POST(request: Request) {
@@ -38,27 +44,32 @@ export async function POST(request: Request) {
   }
 
   const requestedSlug = (body.agent ?? "cmo").trim();
-  const template = templateForUrlSlug(requestedSlug);
-  if (!template) {
+  const resolved = await resolveAgentBySlug(project.slug, requestedSlug);
+  if (!resolved) {
     return NextResponse.json(
       { error: `Unknown agent: '${requestedSlug}'` },
       { status: 404 },
     );
   }
 
-  // Resolve session: explicit body wins, otherwise the active session for
-  // (project, agent). If none, getSessionsView mints a fresh UUID and uses it.
-  let sessionId = body.sessionId?.trim();
+  const agentName = resolved.agent_id;
+
+  // Resolve session: explicit body wins. New pages always pass both sessionId
+  // and sessionKey; sessionKey-only callers (legacy or external) get the
+  // canonical key looked up below.
+  const sessionId = body.sessionId?.trim();
   if (!sessionId) {
-    const view = await getSessionsView(project.slug, template.key as AgentTemplateKey);
-    sessionId = view.active.sessionId;
+    return NextResponse.json(
+      { error: "sessionId is required (call from a threaded chat URL)." },
+      { status: 400 },
+    );
+  }
+  let sessionKey = body.sessionKey?.trim();
+  if (!sessionKey) {
+    const known = findSessionBySessionId(agentName, sessionId);
+    sessionKey = known?.sessionKey ?? buildPendingSessionKey(agentName, sessionId);
   }
 
-  // Persist the active session in the cookie so reloads land back in the same
-  // thread without us tracking anything ourselves.
-  await setActiveSession(project.slug, template.key as AgentTemplateKey, sessionId);
-
-  const agentName = agentNameFor(project.slug, template.key as AgentTemplateKey);
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
@@ -69,18 +80,28 @@ export async function POST(request: Request) {
         );
       };
 
+      const abortCtl = new AbortController();
+      request.signal?.addEventListener("abort", () => abortCtl.abort(), { once: true });
+
       try {
         send("meta", {
           project_slug: project.slug,
           agent: agentName,
           session_id: sessionId,
+          session_key: sessionKey,
         });
-        for await (const chunk of streamAgentTurn({
-          agent: agentName,
-          message: body.message,
+        for await (const evt of streamChatViaGateway({
+          sessionKey,
           sessionId,
+          message: body.message,
+          signal: abortCtl.signal,
         })) {
-          send("text", { chunk });
+          if (evt.kind === "delta") {
+            send("text", { chunk: evt.text });
+          } else if (evt.kind === "error") {
+            send("error", { message: evt.message });
+          }
+          // "final" implicitly ends the loop after; no separate signal needed.
         }
         send("done", {});
       } catch (err) {

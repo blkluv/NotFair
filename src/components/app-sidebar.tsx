@@ -11,6 +11,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarSeparator,
+  SidebarTrigger,
 } from "@/components/ui/sidebar";
 import {
   Home,
@@ -25,10 +26,11 @@ import {
 import { listProjects } from "@/server/db/projects";
 import { getActiveProject } from "@/server/active-project";
 import { pendingApprovalCount } from "@/server/db/approvals";
-import { TEMPLATES, urlSlugForTemplate, type AgentTemplateKey } from "@/server/agent-templates";
+import { listProjectAgents } from "@/server/agent-meta";
 import { ProjectSwitcher } from "./project-switcher";
 import { CostMeter } from "./cost-meter";
 import { AgentNav } from "./agent-nav";
+import { CreateAgentButton } from "./create-agent-button";
 import { Badge } from "@/components/ui/badge";
 
 type NavItem = {
@@ -52,31 +54,43 @@ export async function AppSidebar() {
   const projects = listProjects();
   const active = await getActiveProject();
   const approvalsBadge = active ? pendingApprovalCount(active.slug) : 0;
+  const agentEntries = active ? await listProjectAgents(active.slug) : [];
 
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <ProjectSwitcher
-              projects={projects}
-              activeSlug={active?.slug ?? null}
-            />
-          </SidebarMenuItem>
-        </SidebarMenu>
+        {/* Project switcher + collapse toggle. Toggle stays visible in
+            icon-collapsed mode so the user can always re-expand the rail. */}
+        <div className="flex items-center gap-1">
+          <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <ProjectSwitcher
+                  projects={projects}
+                  activeSlug={active?.slug ?? null}
+                />
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </div>
+          <SidebarTrigger className="shrink-0" />
+        </div>
       </SidebarHeader>
 
       <SidebarContent>
         {active && (
           <SidebarGroup>
-            <SidebarGroupLabel>Agents</SidebarGroupLabel>
+            <SidebarGroupLabel className="flex items-center justify-between">
+              <span>Agents</span>
+              <CreateAgentButton projectSlug={active.slug} />
+            </SidebarGroupLabel>
             <SidebarGroupContent>
               <AgentNav
-                agents={TEMPLATES.map((t) => ({
-                  key: t.key,
-                  slug: urlSlugForTemplate(t.key as AgentTemplateKey),
-                  display_name: t.display_name,
-                  description: t.description,
+                agents={agentEntries.map((a) => ({
+                  key: a.agent_id,
+                  slug: a.slug,
+                  display_name: a.display_name,
+                  description: a.description,
+                  template_key: a.template_key,
                 }))}
               />
             </SidebarGroupContent>

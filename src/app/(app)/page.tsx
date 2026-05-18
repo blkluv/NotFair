@@ -62,7 +62,7 @@ export default async function ProjectHomePage() {
           </p>
         </div>
         <Button asChild>
-          <Link href="/chat/cmo">
+          <Link href="/agents/cmo/chat">
             <MessageSquare className="mr-1.5 size-4" />
             Chat with CMO
           </Link>
@@ -190,7 +190,7 @@ export default async function ProjectHomePage() {
                 if you want agents to do real work (optional, chat works without it)
               </li>
               <li>
-                2. <Link href="/chat/cmo" className="underline">Chat with the CMO</Link> to plan
+                2. <Link href="/agents/cmo/chat" className="underline">Chat with the CMO</Link> to plan
                 what to do
               </li>
               <li>
