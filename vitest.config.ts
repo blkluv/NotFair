@@ -13,11 +13,10 @@ export default defineConfig({
     },
   },
   test: {
+    // Default environment is `node`. Component / page tests that need a DOM
+    // must add `// @vitest-environment jsdom` at the top of the file (vitest 4
+    // removed `environmentMatchGlobs` in favor of per-file comments).
     environment: "node",
-    environmentMatchGlobs: [
-      ["src/components/**", "jsdom"],
-      ["src/app/**/*.test.tsx", "jsdom"],
-    ],
     globals: false,
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     setupFiles: ["./vitest.setup.ts"],

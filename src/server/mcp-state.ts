@@ -1,4 +1,5 @@
 import { openclaw, OpenClawError } from "@/server/openclaw/cli";
+import { bearerFromHeaders, mcpRpc, readMcpConfigRow } from "@/server/mcp/rpc";
 
 /**
  * Read the merged state of a configured MCP server from OpenClaw + a fast
@@ -11,6 +12,9 @@ import { openclaw, OpenClawError } from "@/server/openclaw/cli";
  *  - "connected": row + token + probe succeeded
  *  - "stale_token": row + token but probe came back 401/403
  *  - "unreachable": row + token but probe failed (network/timeout/5xx)
+ *
+ * HTTP plumbing (config-read, bearer parse, JSON-RPC POST, SSE handling)
+ * lives in `@/server/mcp/rpc`. This file owns only the UI status mapping.
  */
 
 export type McpRuntimeStatus =
@@ -35,35 +39,8 @@ export type McpRuntimeStatus =
       last_checked_at: string;
     };
 
-type McpConfigRow = {
-  url?: string;
-  transport?: string;
-  headers?: Record<string, string>;
-};
-
-async function readMcpConfig(key: string): Promise<McpConfigRow | null> {
-  try {
-    const out = await openclaw(["mcp", "show", key], { json: true });
-    if (!out || typeof out !== "object") return null;
-    return out as McpConfigRow;
-  } catch (err) {
-    // OpenClaw exits non-zero when the key is unknown — treat as "not configured".
-    if (err instanceof OpenClawError) return null;
-    throw err;
-  }
-}
-
-function bearerFromHeaders(headers: Record<string, string> | undefined): string | null {
-  if (!headers) return null;
-  // Headers can arrive case-mixed; check both common spellings.
-  const raw = headers.Authorization ?? headers.authorization;
-  if (!raw) return null;
-  const m = raw.match(/^Bearer\s+(.+)$/i);
-  return m ? m[1].trim() : null;
-}
-
 export async function getMcpStatus(key: string): Promise<McpRuntimeStatus> {
-  const config = await readMcpConfig(key);
+  const config = await readMcpConfigRow(key);
   if (!config || !config.url) return { state: "not_configured" };
   const url = config.url;
   const token = bearerFromHeaders(config.headers);
@@ -72,71 +49,64 @@ export async function getMcpStatus(key: string): Promise<McpRuntimeStatus> {
 }
 
 /**
- * Lightweight liveness probe. We POST a JSON-RPC `tools/list` — that's the
- * cheapest MCP call that exercises auth + transport in one round-trip.
- * 2s timeout: this is rendered server-side on the MCP tab and we'd rather
- * show "unreachable" than block the page.
+ * Lightweight liveness probe. POSTs JSON-RPC `tools/list` — the cheapest MCP
+ * call that exercises auth + transport in one round-trip. 2s timeout: this
+ * renders server-side on the MCP tab and we'd rather show "unreachable" than
+ * block the page.
  */
 async function probe(url: string, token: string): Promise<McpRuntimeStatus> {
   const last_checked_at = new Date().toISOString();
-  try {
-    const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), 2000);
-    let res: Response;
-    try {
-      res = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json, text/event-stream",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "tools/list",
-          params: {},
-        }),
-        signal: controller.signal,
-      });
-    } finally {
-      clearTimeout(t);
-    }
-    if (res.status === 401 || res.status === 403) {
-      return { state: "stale_token", url, http_status: res.status, last_checked_at };
-    }
-    if (!res.ok) {
-      return {
-        state: "unreachable",
-        url,
-        error: `HTTP ${res.status}`,
-        last_checked_at,
-      };
-    }
-    // MCP can stream SSE for tools/list. Either format carries the JSON in a
-    // single frame, so a substring count of `"name"` is a decent
-    // tool-count proxy without paying for full SSE parsing here.
-    const text = await res.text();
-    const tools_count = countTools(text);
-    return { state: "connected", url, tools_count, last_checked_at };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { state: "unreachable", url, error: msg, last_checked_at };
+  const r = await mcpRpc<{ tools?: unknown }>(
+    url,
+    token,
+    "tools/list",
+    {},
+    { timeoutMs: 2000 },
+  );
+  if (r.ok) {
+    return {
+      state: "connected",
+      url,
+      tools_count: countToolsFromResult(r.result),
+      last_checked_at,
+    };
   }
+  if (r.kind === "http_error" && (r.status === 401 || r.status === 403)) {
+    return { state: "stale_token", url, http_status: r.status, last_checked_at };
+  }
+  if (r.kind === "http_error") {
+    return { state: "unreachable", url, error: `HTTP ${r.status}`, last_checked_at };
+  }
+  if (r.kind === "timeout") {
+    return { state: "unreachable", url, error: "timed out", last_checked_at };
+  }
+  if (r.kind === "aborted") {
+    return { state: "unreachable", url, error: "aborted", last_checked_at };
+  }
+  if (r.kind === "rpc_error") {
+    return {
+      state: "unreachable",
+      url,
+      error: `rpc error ${r.code}: ${r.message}`,
+      last_checked_at,
+    };
+  }
+  if (r.kind === "malformed_response") {
+    return {
+      state: "unreachable",
+      url,
+      error: `malformed response: ${r.message}`,
+      last_checked_at,
+    };
+  }
+  // network_error
+  return { state: "unreachable", url, error: r.message, last_checked_at };
 }
 
-function countTools(payload: string): number | null {
-  // Tools come as `{"name":"...","description":"...","inputSchema":{...}}`.
-  // We don't fully parse SSE here — count occurrences of `"name":` inside a
-  // `"tools":[...]` array to avoid double-counting server/client name fields.
-  const idx = payload.indexOf('"tools"');
-  if (idx < 0) return null;
-  const slice = payload.slice(idx);
-  const matches = slice.match(/"name"\s*:/g);
-  if (!matches) return null;
-  // Subtract 1 for any spurious match outside the array — heuristic, good
-  // enough for UI display.
-  return Math.max(0, matches.length);
+function countToolsFromResult(result: { tools?: unknown } | undefined): number | null {
+  if (!result || typeof result !== "object") return null;
+  if (!Array.isArray(result.tools)) return null;
+  return result.tools.length;
 }
 
 export async function disconnectMcp(key: string): Promise<void> {
