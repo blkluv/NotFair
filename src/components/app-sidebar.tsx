@@ -28,7 +28,7 @@ import { getActiveProject } from "@/server/active-project";
 import { pendingApprovalCount } from "@/server/db/approvals";
 import { listProjectAgents } from "@/server/agent-meta";
 import { ProjectSwitcher } from "./project-switcher";
-import { CostMeter } from "./cost-meter";
+import { PairedOpenclawPill } from "./paired-openclaw-pill";
 import { AgentNav } from "./agent-nav";
 import { CreateAgentButton } from "./create-agent-button";
 import { Badge } from "@/components/ui/badge";
@@ -123,7 +123,9 @@ export async function AppSidebar() {
 
       <SidebarFooter>
         <SidebarSeparator />
-        {active && <CostMeter project_slug={active.slug} />}
+        <div className="px-2 py-1.5">
+          <PairedOpenclawPill />
+        </div>
       </SidebarFooter>
     </Sidebar>
   );
