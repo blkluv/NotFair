@@ -39,12 +39,19 @@ The UI opens in your browser. Sidebar is project-scoped; create one to start.
 ```
 notfair-cmo                 Launch local server + open UI (default)
 notfair-cmo start           Same as above
-notfair-cmo doctor          Verify OpenClaw, gateway, data dir, LLM key
+notfair-cmo doctor          Run preflight checks (see below)
 notfair-cmo --version
 notfair-cmo --help
 ```
 
 Options on `start`: `--port <n>`, `--no-open`, `--data-dir <path>`.
+Options on `doctor`: `--port <n>`, `--data-dir <path>`.
+
+`doctor` verifies, in order: Node ≥20, OpenClaw on PATH, OpenClaw gateway
+reachable on loopback, an LLM provider configured per `agents.defaults.model`
+(from your OpenClaw config), your data dir is writable, and the preferred port
+is free (probes 3000 → +5). Exits 0 if all checks pass; 1 otherwise, with a
+`Fix:` line under each failure naming the exact command to run.
 
 ## What happens when you create a project
 
