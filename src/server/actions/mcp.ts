@@ -21,6 +21,12 @@ export type StartMcpConnectResult =
  */
 export async function startMcpConnect(input: {
   mcp_key: string;
+  /**
+   * Same-origin path to bounce back to after the callback. Anything that
+   * doesn't look like a local path (no leading `/`, or `//` protocol-relative)
+   * is dropped — the callback will use the default `/connections` instead.
+   */
+  return_to?: string;
 }): Promise<StartMcpConnectResult> {
   const spec = mcpSpecByKey(input.mcp_key);
   if (!spec) return { ok: false, error: `Unknown MCP key: ${input.mcp_key}` };
@@ -67,6 +73,7 @@ export async function startMcpConnect(input: {
     code_verifier,
     redirect_uri,
     project_slug: project.slug,
+    return_to: sanitizeReturnTo(input.return_to),
     created_at: Date.now(),
   });
 
@@ -206,4 +213,17 @@ async function originFromIncomingRequest(): Promise<string> {
 function humanError(err: unknown): string {
   if (err instanceof Error) return err.message;
   return String(err);
+}
+
+/**
+ * Accept only same-origin, path-only redirect targets. Anything with a scheme
+ * or a `//` prefix would let a caller redirect the user off-site after OAuth,
+ * which is an open-redirect class bug. Returns undefined when the input
+ * isn't a safe local path, so the callback falls back to /connections.
+ */
+function sanitizeReturnTo(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  if (!raw.startsWith("/")) return undefined;
+  if (raw.startsWith("//")) return undefined;
+  return raw;
 }

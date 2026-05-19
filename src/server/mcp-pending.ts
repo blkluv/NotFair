@@ -33,6 +33,12 @@ export type PendingMcpFlow = {
   redirect_uri: string;
   /** Project slug (the active project at the time the flow started). */
   project_slug: string;
+  /**
+   * Local path to redirect to after the callback finishes (e.g. the chat
+   * URL the user started from). Validated to be same-origin/path-only when
+   * stashed. Falls back to /connections when absent.
+   */
+  return_to?: string;
   created_at: number;
 };
 

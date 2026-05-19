@@ -9,17 +9,25 @@ import {
   listSessionsForAgent,
   loadSessionHistory,
 } from "@/server/openclaw/sessions";
+import { storedMcpKey } from "@/server/mcp-catalog";
+import { getMcpStatus } from "@/server/mcp-state";
 import { AgentChat } from "@/components/agent-chat";
+import { GoogleAdsMcpBanner } from "@/components/google-ads-mcp-banner";
+import { McpFlashBanner } from "@/components/mcp-flash-banner";
 import { ThreadSelector } from "@/components/thread-selector";
 
 type Params = { agent: string; thread: string };
+type Search = { mcp_connected?: string; mcp_error?: string };
 
 export default async function AgentChatThreadPage({
   params,
+  searchParams,
 }: {
   params: Promise<Params>;
+  searchParams: Promise<Search>;
 }) {
   const { agent: agentSlug, thread: threadId } = await params;
+  const { mcp_connected, mcp_error } = await searchParams;
 
   const project = await getActiveProject();
   if (!project) {
@@ -71,8 +79,24 @@ export default async function AgentChatThreadPage({
         ...allSessions,
       ];
 
+  // The Google Ads agent depends on the notfair-googleads MCP for live
+  // account operations. When it isn't connected yet (or the token is stale),
+  // surface a banner so the user can fix it in one click without leaving
+  // the chat. Probe runs server-side with its own 2s timeout — same as the
+  // Connections page — so a slow upstream can't gate the chat render.
+  const googleAdsMcpStatus =
+    resolved.template_key === "google_ads"
+      ? await getMcpStatus(storedMcpKey(project.slug, "notfair-googleads"))
+      : null;
+
   return (
     <div className="flex h-full flex-col">
+      <McpFlashBanner connected={mcp_connected} error={mcp_error} />
+
+      {googleAdsMcpStatus && googleAdsMcpStatus.state !== "connected" && (
+        <GoogleAdsMcpBanner status={googleAdsMcpStatus} />
+      )}
+
       <div className="flex items-center justify-between border-b bg-background/80 px-6 py-2 backdrop-blur">
         <div className="text-xs text-muted-foreground">
           {sessionsForDropdown.length === 0

@@ -31,7 +31,12 @@ export async function GET(request: Request) {
     return htmlErrorPage("This authorization link has expired or was already used.");
   }
 
-  const back = new URL("/connections", request.url);
+  // The pending state may carry a `return_to` (e.g. the chat URL the user
+  // started from). Default to /connections — that's where the MCP cards
+  // live, so it's a sensible landing if no caller asked for somewhere else.
+  // `return_to` is already sanitized in startMcpConnect to be a same-origin
+  // path; URL() with a base will additionally reject anything malformed.
+  const back = new URL(pending.return_to ?? "/connections", request.url);
 
   if (upstreamError) {
     back.searchParams.set(
