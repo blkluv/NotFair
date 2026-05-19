@@ -140,6 +140,17 @@ export async function POST(request: Request) {
               perf.mark("first_sse_delta_sent");
             }
             send("text", { chunk: evt.text });
+          } else if (evt.kind === "tool") {
+            // tool start/update/result — keyed by toolCallId so the client
+            // can update the matching step row instead of appending a new one.
+            send("tool", {
+              phase: evt.phase,
+              tool_call_id: evt.toolCallId,
+              name: evt.name,
+              label: evt.label,
+            });
+          } else if (evt.kind === "lifecycle") {
+            send("lifecycle", { phase: evt.phase });
           } else if (evt.kind === "error") {
             send("error", { message: evt.message });
           }

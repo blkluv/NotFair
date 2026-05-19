@@ -2,7 +2,18 @@
 
 import { useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Send, AlertCircle, StopCircle } from "lucide-react";
+import {
+  Send,
+  AlertCircle,
+  StopCircle,
+  Loader2,
+  CheckCircle2,
+  Terminal,
+  FileText,
+  Edit3,
+  Globe,
+  Wrench,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -15,10 +26,27 @@ import {
 import { SlashCommandPopover } from "./slash-command-popover";
 import { Markdown } from "./markdown";
 
+type Step = {
+  /** Stable per-invocation id from OpenClaw, used to update in-place. */
+  toolCallId: string;
+  /** Raw tool name (e.g. "exec", "read", "edit", "mcp:foo.bar"). */
+  name: string;
+  /** Pre-formatted one-liner from the server (command / path / etc.). */
+  label?: string;
+  /** start | update | result — drives the spinner vs check icon. */
+  phase: "start" | "update" | "result";
+};
+
 type Message = {
   id: string;
   role: "user" | "assistant" | "error";
   body: string;
+  /**
+   * Tool/MCP invocations the agent made before/while producing this reply,
+   * surfaced inline so the user can watch what's happening instead of
+   * staring at "thinking…". Empty on user/error rows.
+   */
+  steps?: Step[];
 };
 
 export type InitialMessage = {
@@ -228,6 +256,56 @@ export function AgentChat({
                 msg.id === assistantId ? { ...msg, body: msg.body + chunk } : msg,
               ),
             );
+          } else if (evt === "tool") {
+            // Live tool/MCP invocation. Update in place by toolCallId so a
+            // start→result pair becomes one row that flips from spinner to
+            // check, rather than two separate rows.
+            const d = data as {
+              phase: "start" | "update" | "result";
+              tool_call_id: string;
+              name: string;
+              label?: string;
+            };
+            // Treat the first tool event as "we have visible progress" so the
+            // empty-reply branch below doesn't blow away the step list with
+            // the "(command handled by OpenClaw, no reply)" placeholder.
+            receivedText = true;
+            setMessages((m) =>
+              m.map((msg) => {
+                if (msg.id !== assistantId) return msg;
+                const existing = msg.steps ?? [];
+                const idx = existing.findIndex((s) => s.toolCallId === d.tool_call_id);
+                if (idx < 0) {
+                  return {
+                    ...msg,
+                    steps: [
+                      ...existing,
+                      {
+                        toolCallId: d.tool_call_id,
+                        name: d.name,
+                        label: d.label,
+                        phase: d.phase,
+                      },
+                    ],
+                  };
+                }
+                const next = existing.slice();
+                next[idx] = {
+                  ...next[idx],
+                  name: d.name,
+                  // Label only arrives on "start"; preserve it on update/result.
+                  label: d.label ?? next[idx].label,
+                  phase: d.phase,
+                };
+                return { ...msg, steps: next };
+              }),
+            );
+          } else if (evt === "lifecycle") {
+            // Lifecycle markers (start/end/error) don't render today — the
+            // spinner on the assistant bubble already conveys "in progress"
+            // and the closing of the SSE stream marks the end. Reserved for
+            // future use (e.g. compaction toasts) so we accept-and-ignore
+            // rather than logging an "unknown event" warning.
           } else if (evt === "perf") {
             perf.recordServer(
               (data as { marks: Array<{ name: string; at: number; delta: number }> })
@@ -459,20 +537,68 @@ function MessageRow({
   // streaming, partial markdown (e.g. an unclosed fence) is rendered as far as
   // remark can parse it — visually fine because the next chunk arrives within
   // milliseconds.
-  if (message.body === "") {
-    return (
-      <div className="group">
-        <div className="text-sm italic text-muted-foreground">
-          {`${agentDisplayName} is thinking…`}
-        </div>
-      </div>
-    );
-  }
+  const hasSteps = (message.steps?.length ?? 0) > 0;
+  const isEmpty = message.body === "";
   return (
-    <div className="group">
-      <Markdown>{message.body}</Markdown>
+    <div className="group space-y-2">
+      {hasSteps && <StepList steps={message.steps!} />}
+      {isEmpty ? (
+        !hasSteps && (
+          <div className="text-sm italic text-muted-foreground">
+            {`${agentDisplayName} is thinking…`}
+          </div>
+        )
+      ) : (
+        <Markdown>{message.body}</Markdown>
+      )}
     </div>
   );
+}
+
+function StepList({ steps }: { steps: Step[] }) {
+  return (
+    <div className="space-y-1 rounded-md border bg-muted/30 px-3 py-2">
+      {steps.map((s) => (
+        <StepRow key={s.toolCallId} step={s} />
+      ))}
+    </div>
+  );
+}
+
+function StepRow({ step }: { step: Step }) {
+  const Icon = iconForTool(step.name);
+  const done = step.phase === "result";
+  return (
+    <div className="flex items-center gap-2 text-xs">
+      <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground">
+        {done ? (
+          <CheckCircle2 className="size-3.5 text-emerald-600" />
+        ) : (
+          <Loader2 className="size-3.5 animate-spin" />
+        )}
+      </span>
+      <Icon className="size-3.5 shrink-0 text-muted-foreground" />
+      <span className="font-mono text-[11px] font-medium text-foreground">
+        {step.name}
+      </span>
+      {step.label && (
+        <span className="truncate font-mono text-[11px] text-muted-foreground">
+          {step.label}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function iconForTool(name: string) {
+  // Match icons to OpenClaw's built-in tool kinds. Anything else (MCP tools,
+  // plugin tools) falls through to the generic Wrench icon.
+  const n = name.toLowerCase();
+  if (n === "exec" || n === "shell" || n.includes("bash")) return Terminal;
+  if (n === "read" || n === "cat" || n === "open") return FileText;
+  if (n === "write" || n === "edit" || n === "patch") return Edit3;
+  if (n === "fetch" || n.includes("http") || n.includes("web")) return Globe;
+  return Wrench;
 }
 
 function formatAgentError(raw: string): string {

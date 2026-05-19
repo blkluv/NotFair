@@ -192,7 +192,12 @@ export class GatewayClient {
       },
       role: "operator",
       scopes: this.scopes,
-      caps: [],
+      // "tool-events" opts us into the tool-event broadcast stream. Without
+      // this, the gateway gates those frames per `server-methods/chat.ts`
+      // (`registerToolEventRecipient` only fires when the cap is present), so
+      // the whole `stream:"tool"` channel goes dark — even though everything
+      // else (assistant deltas, lifecycle, chat) still arrives.
+      caps: ["tool-events"],
       ...(this.cfg.token || this.cfg.password
         ? { auth: { token: this.cfg.token, password: this.cfg.password } }
         : {}),
@@ -296,6 +301,29 @@ export type ChatPerf = {
 
 export type ChatStreamEvent =
   | { kind: "delta"; text: string }
+  | {
+      kind: "tool";
+      /**
+       * OpenClaw emits start → (update*) → result for each tool invocation.
+       * We surface all three so the UI can show in-progress + final state.
+       */
+      phase: "start" | "update" | "result";
+      /** Stable id per tool invocation; lets the UI update the right row. */
+      toolCallId: string;
+      /** Raw tool name (e.g. "exec", "read", "edit", or "mcp:foo.bar"). */
+      name: string;
+      /**
+       * Human-readable one-liner the UI shows next to the tool name
+       * (e.g. command for exec, path for read/write). Pre-computed on the
+       * server so the client doesn't need to know every tool's args shape.
+       */
+      label?: string;
+    }
+  | {
+      kind: "lifecycle";
+      /** "start" | "end" | "error" — useful for UI heartbeat / "agent is working". */
+      phase: string;
+    }
   | { kind: "final"; text: string }
   | { kind: "error"; message: string };
 
@@ -398,15 +426,54 @@ export async function* streamChatViaGateway(
           state?: string;
           deltaText?: string;
           replace?: boolean;
-          data?: { delta?: string; text?: string; replace?: boolean };
+          data?: {
+            delta?: string;
+            text?: string;
+            replace?: boolean;
+            phase?: string;
+            name?: string;
+            toolCallId?: string;
+            args?: unknown;
+          };
           message?: { content?: Array<{ type?: string; text?: string }> };
         }
       | undefined;
-    if (!payload || payload.runId !== runId) return;
+    if (!payload) return;
+    // Filter by sessionKey, not runId: OpenClaw's tool/lifecycle/assistant
+    // events carry the *engine* runId, which is distinct from the
+    // idempotencyKey we pass in chat.send. Per the OpenClaw web UI
+    // (`ui/src/ui/app-tool-stream.ts`), session is the only reliable key.
+    // Runs are serialized per session, so only one turn is in flight here.
+    if (payload.sessionKey && payload.sessionKey !== input.sessionKey) return;
 
     if (!firstEventSeen) {
       firstEventSeen = true;
       perf?.mark("gw_first_event");
+    }
+
+    if (evt.event === "agent" && payload.stream === "tool") {
+      const d = payload.data ?? {};
+      const toolCallId = typeof d.toolCallId === "string" ? d.toolCallId : "";
+      if (!toolCallId) return;
+      const phase = d.phase === "start" || d.phase === "update" || d.phase === "result"
+        ? d.phase
+        : null;
+      if (!phase) return;
+      const name = typeof d.name === "string" ? d.name : "tool";
+      const label = phase === "start" ? labelForTool(name, d.args) : undefined;
+      events.push({ kind: "tool", phase, toolCallId, name, label });
+      wake();
+      return;
+    }
+
+    if (evt.event === "agent" && payload.stream === "lifecycle") {
+      const d = payload.data ?? {};
+      const phase = typeof d.phase === "string" ? d.phase : payload.state;
+      if (phase) {
+        events.push({ kind: "lifecycle", phase });
+        wake();
+      }
+      return;
     }
 
     if (evt.event === "agent" && payload.stream === "assistant") {
@@ -504,6 +571,65 @@ export async function* streamChatViaGateway(
     if (input.signal) input.signal.removeEventListener("abort", onAbort);
     // Do NOT close the shared client — subsequent turns reuse it.
   }
+}
+
+/**
+ * Compress a tool invocation's args into a single human-readable label.
+ * Matches the spirit of OpenClaw's menu-bar status text (`exec: pnpm test`,
+ * `read: apps/foo.ts`) so the chat UI feels familiar to anyone who's seen
+ * the desktop app. Falls back to the bare tool name when nothing useful
+ * can be extracted.
+ */
+function labelForTool(name: string, args: unknown): string | undefined {
+  if (!args || typeof args !== "object") return undefined;
+  const a = args as Record<string, unknown>;
+  // exec / shell: show the first line of the command
+  const cmd = pickString(a, ["command", "cmd", "script"]);
+  if (cmd) return firstLine(cmd);
+  // file ops: show the path
+  const path = pickString(a, ["path", "file_path", "filename", "file"]);
+  if (path) return shortenPath(path);
+  // web fetches: show the URL
+  const url = pickString(a, ["url", "uri"]);
+  if (url) return url;
+  // MCP / generic: show a method or query if present
+  const method = pickString(a, ["method", "tool", "operation"]);
+  if (method) return method;
+  const query = pickString(a, ["query", "q", "prompt"]);
+  if (query) return truncate(query, 120);
+  // Last resort: stringify the args (capped) so the user sees *something*.
+  try {
+    const json = JSON.stringify(a);
+    return truncate(json, 120);
+  } catch {
+    return undefined;
+  }
+}
+
+function pickString(obj: Record<string, unknown>, keys: string[]): string | null {
+  for (const k of keys) {
+    const v = obj[k];
+    if (typeof v === "string" && v.trim().length > 0) return v.trim();
+  }
+  return null;
+}
+
+function firstLine(s: string): string {
+  const nl = s.indexOf("\n");
+  const line = nl >= 0 ? s.slice(0, nl) : s;
+  return truncate(line, 160);
+}
+
+function shortenPath(p: string): string {
+  // Keep filename + one parent dir to stay informative without taking up
+  // a whole row — matches the menu-bar app's heuristic.
+  const segs = p.split("/");
+  if (segs.length <= 2) return p;
+  return `…/${segs[segs.length - 2]}/${segs[segs.length - 1]}`;
+}
+
+function truncate(s: string, n: number): string {
+  return s.length > n ? `${s.slice(0, n - 1)}…` : s;
 }
 
 function extractText(content: Array<{ type?: string; text?: string }> | undefined): string {
