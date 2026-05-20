@@ -97,6 +97,14 @@ export function LiveTranscript({
   const [byteOffset, setByteOffset] = useState(initialByteOffset);
   const [input, setInput] = useState("");
   const [sendingChat, setSendingChat] = useState(false);
+  /**
+   * Wallclock when the current turn started, in ms. Drives the "elapsed"
+   * counter in WorkingStatus during the gap between hitting send and the
+   * agent's first transcript event landing — without this, elapsed reflects
+   * the *previous* turn's last event timestamp (often minutes/hours stale).
+   * Cleared once the new user_message lands and rendering catches up.
+   */
+  const [turnStartedAt, setTurnStartedAt] = useState<number | null>(null);
   const [stopPolling, setStopPolling] = useState(false);
   const [slashIndex, setSlashIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -258,6 +266,7 @@ export function LiveTranscript({
 
       if (!usingOverride) setInput("");
       setSendingChat(true);
+      setTurnStartedAt(Date.now());
       setPendingUserMsg(opts.hidden ? null : text);
       setPendingAssistant("");
       setPendingTools([]);
@@ -326,6 +335,7 @@ export function LiveTranscript({
         }
       } finally {
         setSendingChat(false);
+        setTurnStartedAt(null);
         abortRef.current = null;
       }
     },
@@ -399,7 +409,11 @@ export function LiveTranscript({
               )}
               {showThinking && (
                 <li>
-                  <ThinkingPulse agentDisplayName={agentDisplayName} />
+                  <WorkingStatus
+                    agentDisplayName={agentDisplayName}
+                    events={events}
+                    turnStartedAt={turnStartedAt}
+                  />
                 </li>
               )}
             </ol>
@@ -874,13 +888,148 @@ function ToolRow({ entry }: { entry: ToolEntry }) {
   );
 }
 
-function ThinkingPulse({ agentDisplayName }: { agentDisplayName: string }) {
+/**
+ * Live "agent is working" indicator. Beyond just a pulse, surfaces:
+ *   - what phase we're in (starting / thinking / wrapping up / running a tool)
+ *   - the last tool the agent ran (so the user sees forward motion)
+ *   - elapsed time since the most recent transcript event (ticks every 1s)
+ *   - cumulative tool count so far
+ *
+ * Falls back to a bare pulse when we have nothing more useful to say (e.g.
+ * the SSE composer-send case where transcript events haven't landed yet).
+ */
+function WorkingStatus({
+  agentDisplayName,
+  events,
+  turnStartedAt,
+}: {
+  agentDisplayName: string;
+  events: TranscriptEvent[];
+  /**
+   * Wallclock when the current send/turn began. When present and more
+   * recent than the latest event's ts, drives the elapsed counter — keeps
+   * "elapsed" from showing the gap-since-the-previous-turn while the new
+   * turn's first event hasn't been written to JSONL yet.
+   */
+  turnStartedAt: number | null;
+}) {
+  const [now, setNow] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const lastEvent = events.length > 0 ? events[events.length - 1] : null;
+  const lastToolResult = [...events]
+    .reverse()
+    .find((e): e is Extract<TranscriptEvent, { kind: "tool_result" }> =>
+      e.kind === "tool_result",
+    );
+  const inFlightToolCall = (() => {
+    // Last tool_call with no later tool_result for the same id. ToolGroup
+    // already shows this with a spinner — we mirror it here only when it's
+    // the latest event so the working pulse reflects the same thing.
+    if (!lastEvent || lastEvent.kind !== "tool_call") return null;
+    const matched = events.some(
+      (e) => e.kind === "tool_result" && e.tool_call_id === lastEvent.tool_call_id,
+    );
+    return matched ? null : lastEvent;
+  })();
+  const toolsRun = events.reduce(
+    (n, e) => n + (e.kind === "tool_result" ? 1 : 0),
+    0,
+  );
+
+  let headline = `${agentDisplayName} is thinking…`;
+  let subtitle: string | null = null;
+  if (!lastEvent || lastEvent.kind === "user_message" || lastEvent.kind === "unknown") {
+    headline = `Starting ${agentDisplayName}…`;
+    subtitle = "Delivering the brief to OpenClaw.";
+  } else if (inFlightToolCall) {
+    headline = `Calling ${formatToolName(inFlightToolCall.name)}…`;
+    subtitle = inFlightToolCall.label ?? null;
+  } else if (lastEvent.kind === "tool_result") {
+    headline = `${agentDisplayName} is thinking…`;
+    subtitle = lastEvent.ok
+      ? `Last step · ${formatToolName(lastEvent.name)} ✓`
+      : `Last step · ${formatToolName(lastEvent.name)} failed — retrying`;
+  } else if (lastEvent.kind === "assistant_text") {
+    headline = `${agentDisplayName} is wrapping up…`;
+  }
+
+  const anchorTs = (() => {
+    const lastTs = lastEvent?.ts ?? null;
+    if (turnStartedAt && lastTs) return Math.max(turnStartedAt, lastTs);
+    return turnStartedAt ?? lastTs;
+  })();
+  const elapsedMs = anchorTs != null ? Math.max(0, now - anchorTs) : null;
+
   return (
-    <div className="flex items-center gap-2 text-xs italic text-muted-foreground">
+    <div className="flex items-start gap-2.5 rounded-md border border-dashed border-muted-foreground/25 bg-muted/10 px-3 py-2 text-xs">
       <RunningDot size="sm" aria-label="" />
-      {agentDisplayName} is working…
+      <div className="min-w-0 flex-1 space-y-0.5">
+        <div className="flex items-baseline gap-2">
+          <span className="italic text-muted-foreground">{headline}</span>
+          {elapsedMs != null && (
+            <span className="tabular-nums text-[10px] text-muted-foreground/70">
+              {formatElapsed(elapsedMs)}
+            </span>
+          )}
+        </div>
+        {(subtitle || toolsRun > 0) && (
+          <div className="flex min-w-0 items-center gap-1.5 text-[10px] text-muted-foreground/80">
+            {subtitle && (
+              <span className="truncate font-mono">{subtitle}</span>
+            )}
+            {subtitle && toolsRun > 0 && <span aria-hidden>·</span>}
+            {toolsRun > 0 && (
+              <span className="tabular-nums">
+                {toolsRun} tool{toolsRun === 1 ? "" : "s"} run
+              </span>
+            )}
+            {!subtitle && lastToolResult && toolsRun > 0 && (
+              <>
+                <span aria-hidden>·</span>
+                <span className="truncate font-mono">
+                  last · {formatToolName(lastToolResult.name)}
+                </span>
+              </>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
+}
+
+function formatElapsed(ms: number): string {
+  if (ms < 1500) return "just now";
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  if (m < 60) return rem === 0 ? `${m}m` : `${m}m ${rem}s`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${m % 60}m`;
+}
+
+/**
+ * Strip the project-slug prefix and the namespace path so the user sees
+ * the bare action name. Tools come in two conventions:
+ *   `<mcp>.action`             → e.g. `notfair.runScript`
+ *   `<project>-<mcp>__action`  → e.g. `demo1-notfair-googleads__runScript`
+ * Both should render as just the action. Falls back to the input untouched.
+ */
+function formatToolName(name: string): string {
+  if (!name) return name;
+  for (const sep of ["__", "."]) {
+    const idx = name.lastIndexOf(sep);
+    if (idx >= 0) {
+      const tail = name.slice(idx + sep.length);
+      if (tail) return tail;
+    }
+  }
+  return name;
 }
 
 function ErrorRow({
