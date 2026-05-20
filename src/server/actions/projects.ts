@@ -26,6 +26,9 @@ import {
   getProjectDeletionSummary,
   type ProjectDeletionSummary,
 } from "@/server/openclaw/project-delete";
+import { MCP_CATALOG, storedMcpKey } from "@/server/mcp-catalog";
+import { disconnectMcp } from "@/server/mcp-state";
+import { clearProvisioning } from "@/server/onboarding/provisioning-state";
 
 export type ActionResult<T = void> =
   | { ok: true; data: T }
@@ -328,6 +331,8 @@ export type DeleteProjectData = {
   agentsFailed: Array<{ agentId: string; error: string }>;
   crons: number;
   cronsFailed: number;
+  mcps: number;
+  mcpsFailed: number;
 };
 
 export async function deleteProjectAction(
@@ -382,10 +387,35 @@ export async function deleteProjectAction(
     }
   }
 
-  // 3) Local DB rows.
+  // 3) Revoke per-project MCP connections (bearer tokens live in OpenClaw's
+  //    mcp config under `<slug>-<catalog-key>`). Per-MCP best-effort so one
+  //    unreachable MCP doesn't block the rest of the cascade.
+  let mcpsRevoked = 0;
+  let mcpsFailed = 0;
+  for (const spec of MCP_CATALOG) {
+    const key = storedMcpKey(slug, spec.key);
+    try {
+      await disconnectMcp(key);
+      mcpsRevoked++;
+    } catch (err) {
+      // disconnectMcp is already idempotent for "not configured" — anything
+      // hitting this path is a real openclaw-cli failure we want to surface.
+      const message = err instanceof Error ? err.message : String(err);
+      // "not found" / "unknown" responses are swallowed by disconnectMcp;
+      // anything else counts as a failure but doesn't abort delete.
+      console.warn(`[delete-project] failed to revoke MCP ${key}: ${message}`);
+      mcpsFailed++;
+    }
+  }
+
+  // 4) Drop the in-memory provisioning Promise so a re-created project with
+  //    the same slug starts fresh (and we don't leak the old Promise).
+  clearProvisioning(slug);
+
+  // 5) Local DB rows.
   deleteProjectRow(slug);
 
-  // 4) Clear active-project cookie if it pointed at this one.
+  // 6) Clear active-project cookie if it pointed at this one.
   const c = await cookies();
   if (c.get("notfair_active_project")?.value === slug) {
     await clearActiveProject();
@@ -404,6 +434,8 @@ export async function deleteProjectAction(
       agentsFailed,
       crons: cronsDeleted,
       cronsFailed,
+      mcps: mcpsRevoked,
+      mcpsFailed,
     },
   };
 }

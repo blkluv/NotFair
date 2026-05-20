@@ -121,10 +121,11 @@ export function DangerZone({ projectSlug, projectName }: Props) {
             </div>
           ) : summary ? (
             <div className="space-y-3">
-              <div className="grid grid-cols-3 divide-x rounded-lg border bg-card">
+              <div className="grid grid-cols-4 divide-x rounded-lg border bg-card">
                 <Stat label="Agents" value={summary.totals.agents} />
                 <Stat label="Threads" value={summary.totals.threads} />
                 <Stat label="Crons" value={summary.totals.crons} />
+                <Stat label="MCPs" value={summary.totals.mcps} />
               </div>
               {summary.agents.some((a) => a.exists) && (
                 <ul className="space-y-1 text-xs">

@@ -171,24 +171,33 @@ export function unarchiveProject(slug: string): Project | null {
 }
 
 /**
- * Hard-delete a project row plus any rows in tables that key off project_slug
- * (guardrails, approvals, agent_actions, etc.). OpenClaw-side state — agents,
- * sessions, crons — is cleaned up by the deleteProject orchestrator, not here.
+ * Hard-delete a project row plus any rows in tables that key off
+ * project_slug. OpenClaw-side state — agents, sessions, crons — is cleaned
+ * up by the deleteProject orchestrator, not here.
+ *
+ * MUST match the FK-bearing tables from the migrations (mirrored exactly by
+ * the changeProjectSlug helper above). Adding a new migration that FKs to
+ * projects(slug) requires adding the table name here too — otherwise delete
+ * trips a SqliteError FOREIGN KEY constraint failed (the bug we just
+ * shipped a regression test for).
  */
 export function deleteProjectRow(slug: string): void {
   const db = getDb();
   const childTables = [
-    "guardrails",
+    "tasks",
     "approvals",
+    "cost_events",
+    "oauth_tokens",
+    "guardrails",
     "agent_actions",
-    "cost_snapshots",
-    "connections",
+    "sequence_runs",
   ];
   for (const table of childTables) {
     try {
       db.prepare(`DELETE FROM ${table} WHERE project_slug = ?`).run(slug);
     } catch {
-      // table missing on this install; skip.
+      // table missing on this install (e.g., older DB pre-migration).
+      // Per-table try/catch so one missing table doesn't block the rest.
     }
   }
   db.prepare("DELETE FROM projects WHERE slug = ?").run(slug);

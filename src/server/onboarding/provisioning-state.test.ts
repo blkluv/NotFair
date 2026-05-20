@@ -8,6 +8,7 @@ vi.mock("@/server/agent-templates", () => ({
 import {
   __resetProvisioningForTesting,
   awaitProvisioning,
+  clearProvisioning,
   startProvisioning,
   type ProvisionResult,
 } from "./provisioning-state";
@@ -65,6 +66,25 @@ describe("provisioning-state", () => {
       startProvisioning("acme", rejected);
       const r = await awaitProvisioning("acme", 5_000);
       expect(r).toEqual({ kind: "timeout" });
+    });
+  });
+
+  describe("clearProvisioning (called from deleteProjectAction)", () => {
+    it("drops an in-flight Promise so a re-created slug starts fresh", async () => {
+      const slowPromise = new Promise<ProvisionResult>((resolve) =>
+        setTimeout(() => resolve(okResult), 1_000),
+      );
+      startProvisioning("acme", slowPromise);
+      clearProvisioning("acme");
+      // After clear, the Map is empty for this slug → next awaitProvisioning
+      // hits the cold-start fallback path.
+      agentExistsMock.mockResolvedValue(false);
+      const r = await awaitProvisioning("acme", 5_000);
+      expect(r).toEqual({ kind: "no-agents", via_fallback: true });
+    });
+
+    it("is a no-op when slug isn't in the Map (deleteProjectAction can call defensively)", () => {
+      expect(() => clearProvisioning("never-seen")).not.toThrow();
     });
   });
 

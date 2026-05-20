@@ -102,6 +102,16 @@ export async function awaitProvisioning(
   return { kind: "no-agents", via_fallback: true };
 }
 
+/**
+ * Drop any in-flight or stale provisioning Promise for a slug. Called by
+ * deleteProjectAction so a deleted project doesn't leak its Promise entry
+ * in the global Map (and so re-creating a project with the same slug
+ * later starts from a clean state).
+ */
+export function clearProvisioning(slug: string): void {
+  STORE.delete(slug);
+}
+
 /** Test helper: drain the global Map. Never call in production code. */
 export function __resetProvisioningForTesting(): void {
   STORE.clear();
