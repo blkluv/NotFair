@@ -7,7 +7,6 @@ import {
   buildPendingSessionKey,
   findSessionBySessionId,
 } from "@/server/openclaw/sessions";
-import { processOrchestrationBlocks } from "@/server/orchestration/process-blocks";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -193,44 +192,12 @@ export async function POST(request: Request) {
         }
         perf.mark("stream_done");
 
-        // Process orchestration blocks emitted by the agent during the turn.
-        // Tasks created, status updates, comments, ask_user, approval requests
-        // all materialize as DB rows here. Failures are non-fatal — the user
-        // still sees the assistant reply; orchestration just doesn't apply.
-        if (assistantBuffer.trim().length > 0) {
-          try {
-            const outcome = await processOrchestrationBlocks(assistantBuffer, {
-              project_slug: project.slug,
-              agent_id: agentName,
-            });
-            perf.mark("orchestration_done");
-            if (
-              outcome.tasks_created.length > 0 ||
-              outcome.task_status_updates.length > 0 ||
-              outcome.comments_added.length > 0 ||
-              outcome.ask_user.length > 0 ||
-              outcome.approvals_requested.length > 0 ||
-              outcome.errors.length > 0
-            ) {
-              send("orchestration", {
-                tasks_created: outcome.tasks_created.map((t) => ({
-                  id: t.id,
-                  title: t.title,
-                  assignee: t.agent_id,
-                  status: t.status,
-                })),
-                task_status_updates: outcome.task_status_updates,
-                comments_added: outcome.comments_added,
-                ask_user: outcome.ask_user,
-                approvals_requested: outcome.approvals_requested,
-                errors: outcome.errors,
-              });
-            }
-          } catch (orchErr) {
-            // Don't let an orchestration parse failure break the chat reply.
-            console.error("[chat] orchestration processing failed:", orchErr);
-          }
-        }
+        // Orchestration side effects (task creation, status updates,
+        // comments, approvals) now happen via the notfair-orchestration MCP
+        // server — the agent calls those tools mid-stream and the handler
+        // mutates DB rows directly. We no longer regex-scan the assistant
+        // reply for pseudo-XML blocks. See agent-templates.ts for the
+        // procedural teaching pattern.
 
         send("perf", { marks: perf.summary() });
         send("done", {});

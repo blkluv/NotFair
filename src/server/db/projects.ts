@@ -112,6 +112,7 @@ export function changeProjectSlug(
   const childTables = [
     "tasks",
     "approvals",
+    "approval_policies",
     "cost_events",
     "oauth_tokens",
     "agent_actions",
@@ -184,7 +185,10 @@ export function deleteProjectRow(slug: string): void {
   const db = getDb();
   const childTables = [
     "tasks",
+    // approval_comments is cleaned up by FK ON DELETE CASCADE when we drop
+    // the parent approvals rows below.
     "approvals",
+    "approval_policies",
     "cost_events",
     "oauth_tokens",
     "agent_actions",

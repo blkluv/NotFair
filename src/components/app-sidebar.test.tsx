@@ -4,7 +4,7 @@ import { render, screen, cleanup } from "@testing-library/react";
 
 const listProjects = vi.fn();
 const getActiveProject = vi.fn();
-const pendingApprovalCount = vi.fn();
+const actionableApprovalCount = vi.fn();
 const listProjectAgents = vi.fn();
 const inFlightCountsByAgent = vi.fn();
 const discoverGateway = vi.fn();
@@ -18,7 +18,7 @@ vi.mock("@/server/active-project", () => ({
 }));
 
 vi.mock("@/server/db/approvals", () => ({
-  pendingApprovalCount: (...args: unknown[]) => pendingApprovalCount(...args),
+  actionableApprovalCount: (...args: unknown[]) => actionableApprovalCount(...args),
 }));
 
 vi.mock("@/server/agent-meta", () => ({
@@ -120,7 +120,7 @@ const projects = [
 beforeEach(() => {
   listProjects.mockReset();
   getActiveProject.mockReset();
-  pendingApprovalCount.mockReset();
+  actionableApprovalCount.mockReset();
   listProjectAgents.mockReset();
   inFlightCountsByAgent.mockReset();
   discoverGateway.mockReset();
@@ -142,7 +142,7 @@ describe("AppSidebar", () => {
   it("renders the project switcher with the active slug", async () => {
     listProjects.mockReturnValue(projects);
     getActiveProject.mockResolvedValue(projects[0]);
-    pendingApprovalCount.mockReturnValue(0);
+    actionableApprovalCount.mockReturnValue(0);
     listProjectAgents.mockResolvedValue([]);
     inFlightCountsByAgent.mockReturnValue(new Map());
     await renderSidebar();
@@ -163,7 +163,7 @@ describe("AppSidebar", () => {
   it("renders project navigation links scoped to the active slug", async () => {
     listProjects.mockReturnValue(projects);
     getActiveProject.mockResolvedValue(projects[0]);
-    pendingApprovalCount.mockReturnValue(0);
+    actionableApprovalCount.mockReturnValue(0);
     listProjectAgents.mockResolvedValue([]);
     inFlightCountsByAgent.mockReturnValue(new Map());
     await renderSidebar();
@@ -200,7 +200,7 @@ describe("AppSidebar", () => {
   it("shows the approvals badge with the pending count when non-zero", async () => {
     listProjects.mockReturnValue(projects);
     getActiveProject.mockResolvedValue(projects[0]);
-    pendingApprovalCount.mockReturnValue(7);
+    actionableApprovalCount.mockReturnValue(7);
     listProjectAgents.mockResolvedValue([]);
     inFlightCountsByAgent.mockReturnValue(new Map());
     await renderSidebar();
@@ -210,7 +210,7 @@ describe("AppSidebar", () => {
   it("omits the badge when approvals are zero", async () => {
     listProjects.mockReturnValue(projects);
     getActiveProject.mockResolvedValue(projects[0]);
-    pendingApprovalCount.mockReturnValue(0);
+    actionableApprovalCount.mockReturnValue(0);
     listProjectAgents.mockResolvedValue([]);
     inFlightCountsByAgent.mockReturnValue(new Map());
     await renderSidebar();
@@ -220,7 +220,7 @@ describe("AppSidebar", () => {
   it("forwards agents and in-flight counts to AgentNav", async () => {
     listProjects.mockReturnValue(projects);
     getActiveProject.mockResolvedValue(projects[0]);
-    pendingApprovalCount.mockReturnValue(0);
+    actionableApprovalCount.mockReturnValue(0);
     listProjectAgents.mockResolvedValue([
       {
         agent_id: "alpha-cmo",
@@ -241,7 +241,7 @@ describe("AppSidebar", () => {
   it("flips the liveness flag on when any agent has in-flight work", async () => {
     listProjects.mockReturnValue(projects);
     getActiveProject.mockResolvedValue(projects[0]);
-    pendingApprovalCount.mockReturnValue(0);
+    actionableApprovalCount.mockReturnValue(0);
     listProjectAgents.mockResolvedValue([]);
     inFlightCountsByAgent.mockReturnValue(new Map([["alpha-cmo", 1]]));
     await renderSidebar();
@@ -251,7 +251,7 @@ describe("AppSidebar", () => {
   it("keeps the liveness flag off when nothing is running", async () => {
     listProjects.mockReturnValue(projects);
     getActiveProject.mockResolvedValue(projects[0]);
-    pendingApprovalCount.mockReturnValue(0);
+    actionableApprovalCount.mockReturnValue(0);
     listProjectAgents.mockResolvedValue([]);
     inFlightCountsByAgent.mockReturnValue(new Map([["alpha-cmo", 0]]));
     await renderSidebar();
@@ -261,7 +261,7 @@ describe("AppSidebar", () => {
   it("shows the CreateAgentButton when a project is active", async () => {
     listProjects.mockReturnValue(projects);
     getActiveProject.mockResolvedValue(projects[0]);
-    pendingApprovalCount.mockReturnValue(0);
+    actionableApprovalCount.mockReturnValue(0);
     listProjectAgents.mockResolvedValue([]);
     inFlightCountsByAgent.mockReturnValue(new Map());
     await renderSidebar();

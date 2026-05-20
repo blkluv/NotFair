@@ -36,7 +36,6 @@ import {
   parseSlashMessage,
   type SlashCommand,
 } from "@/lib/slash-commands";
-import { stripOrchestrationBlocks } from "@/server/orchestration/blocks";
 import type { TranscriptEvent } from "@/server/openclaw/transcript-tail";
 import { projectHref } from "@/lib/project-href";
 
@@ -59,6 +58,12 @@ type Props = {
    * shouldn't send mid-run input). Default: composer always enabled.
    */
   composerDisabled?: boolean;
+  /**
+   * Set when the agent's task is parked in `blocked` (e.g., waiting on a
+   * pending approval). Replaces the "thinking…" / "wrapping up…" indicator
+   * — those imply forward motion, but a blocked task is dormant by design.
+   */
+  blockedReason?: string;
   /**
    * When set, on each successful poll we call this so the parent can
    * react to JSONL growth (e.g., trigger router.refresh to refetch task
@@ -88,6 +93,7 @@ export function LiveTranscript({
   initialEvents,
   initialByteOffset,
   composerDisabled = false,
+  blockedReason,
   onPolled,
   autoKickoff = false,
   kickoffMessage,
@@ -430,11 +436,15 @@ export function LiveTranscript({
               )}
               {showThinking && (
                 <li>
-                  <WorkingStatus
-                    agentDisplayName={agentDisplayName}
-                    events={events}
-                    turnStartedAt={turnStartedAt}
-                  />
+                  {blockedReason ? (
+                    <BlockedStatus reason={blockedReason} />
+                  ) : (
+                    <WorkingStatus
+                      agentDisplayName={agentDisplayName}
+                      events={events}
+                      turnStartedAt={turnStartedAt}
+                    />
+                  )}
                 </li>
               )}
             </ol>
@@ -768,11 +778,12 @@ function UserBubble({ body }: { body: string }) {
 }
 
 function AssistantText({ body }: { body: string }) {
-  const cleanBody = stripOrchestrationBlocks(body);
-  if (cleanBody.trim() === "") return null;
+  // Orchestration side effects now go through MCP tool calls, not
+  // pseudo-XML blocks. We render the assistant's prose as-is.
+  if (body.trim() === "") return null;
   return (
     <div className="text-sm leading-relaxed">
-      <Markdown>{cleanBody}</Markdown>
+      <Markdown>{body}</Markdown>
     </div>
   );
 }
@@ -905,6 +916,32 @@ function ToolRow({ entry }: { entry: ToolEntry }) {
           <span className="break-words">{entry.result}</span>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Replaces WorkingStatus when the task is parked in `blocked`. The agent
+ * isn't currently running — it's dormant until the gating condition (most
+ * often a pending approval) resolves. Showing "thinking…" or "wrapping
+ * up…" here misleads the user into thinking work is still happening.
+ */
+function BlockedStatus({ reason }: { reason: string }) {
+  return (
+    <div className="flex items-start gap-2.5 rounded-md border border-dashed border-amber-500/40 bg-amber-50/40 px-3 py-2 text-xs dark:bg-amber-950/20">
+      <span
+        className="mt-1 inline-block size-2 shrink-0 rounded-full bg-amber-500"
+        aria-hidden
+      />
+      <div className="min-w-0 flex-1">
+        <div className="font-medium text-amber-900 dark:text-amber-200">
+          Paused — {reason}
+        </div>
+        <div className="mt-0.5 text-[11px] text-amber-700/80 dark:text-amber-300/70">
+          The agent will resume automatically when the gating condition
+          resolves.
+        </div>
+      </div>
     </div>
   );
 }

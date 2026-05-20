@@ -11,9 +11,20 @@ vi.mock("./db", () => ({
 }));
 
 import {
+  actionableApprovalCount,
+  appendComment,
   createApproval,
+  createPolicy,
+  deletePolicy,
+  findMatchingPolicy,
+  getApproval,
+  listActionableApprovals,
+  listComments,
   listPendingApprovals,
+  listPolicies,
+  listResolvedApprovals,
   pendingApprovalCount,
+  requestApprovalRevision,
   resolveApproval,
 } from "./approvals";
 
@@ -327,5 +338,441 @@ describe("resolveApproval", () => {
 
   it("returns null when the approval id doesn't exist", () => {
     expect(resolveApproval("missing-id", "approved")).toBeNull();
+  });
+
+  it("persists decision_note + decided_by_kind + decided_by_id on resolve", () => {
+    seedProject();
+    const a = createApproval({
+      project_slug: "acme",
+      agent_id: "x",
+      action_summary: "p",
+      action_type: "other",
+      cost_estimate_usd: 0,
+      payload: {},
+    });
+    const out = resolveApproval(a.id, "approved", {
+      decision_note: "Looks good",
+      decided_by_kind: "user",
+      decided_by_id: "alice@example.com",
+    });
+    expect(out!.decision_note).toBe("Looks good");
+    expect(out!.decided_by_kind).toBe("user");
+    expect(out!.decided_by_id).toBe("alice@example.com");
+  });
+});
+
+describe("createApproval + policies", () => {
+  it("creates a pending row by default with task_id null and no decision metadata", () => {
+    seedProject();
+    const a = createApproval({
+      project_slug: "acme",
+      agent_id: "acme-google-ads",
+      action_summary: "raise bid",
+      action_type: "bid_change",
+      cost_estimate_usd: 5,
+      payload: {},
+    });
+    expect(a.task_id).toBeNull();
+    expect(a.status).toBe("pending");
+    expect(a.decided_by_kind).toBeNull();
+    expect(a.decided_by_id).toBeNull();
+    expect(a.decision_note).toBeNull();
+  });
+
+  it("auto-approves when a matching policy exists", () => {
+    seedProject();
+    const policy = createPolicy({
+      project_slug: "acme",
+      action_type: "bid_change",
+      agent_id: null,
+      max_cost_usd: null,
+      auto_decision: "approve",
+      note: "trusted",
+      created_by_kind: "user",
+    });
+    const a = createApproval({
+      project_slug: "acme",
+      agent_id: "acme-google-ads",
+      action_summary: "raise bid",
+      action_type: "bid_change",
+      cost_estimate_usd: 50,
+      payload: {},
+    });
+    expect(a.status).toBe("approved");
+    expect(a.decided_by_kind).toBe("policy");
+    expect(a.decided_by_id).toBe(policy.id);
+    expect(a.resolved_at).not.toBeNull();
+
+    // System comment recorded so the thread shows the trail.
+    const comments = listComments(a.id);
+    expect(comments).toHaveLength(1);
+    expect(comments[0]!.author_kind).toBe("system");
+    expect(comments[0]!.body).toContain("Auto-approved");
+  });
+
+  it("does NOT auto-approve when cost exceeds max_cost_usd", () => {
+    seedProject();
+    createPolicy({
+      project_slug: "acme",
+      action_type: "bid_change",
+      agent_id: null,
+      max_cost_usd: 10,
+      auto_decision: "approve",
+      created_by_kind: "user",
+    });
+    const a = createApproval({
+      project_slug: "acme",
+      agent_id: "acme-google-ads",
+      action_summary: "expensive bid raise",
+      action_type: "bid_change",
+      cost_estimate_usd: 50,
+      payload: {},
+    });
+    expect(a.status).toBe("pending");
+    expect(a.decided_by_kind).toBeNull();
+  });
+
+  it("auto-rejects when a matching reject policy exists", () => {
+    seedProject();
+    createPolicy({
+      project_slug: "acme",
+      action_type: "content_publishing",
+      agent_id: null,
+      max_cost_usd: null,
+      auto_decision: "reject",
+      note: "human approval required for content",
+      created_by_kind: "user",
+    });
+    const a = createApproval({
+      project_slug: "acme",
+      agent_id: "acme-seo",
+      action_summary: "publish landing page",
+      action_type: "content_publishing",
+      cost_estimate_usd: 0,
+      payload: {},
+    });
+    expect(a.status).toBe("rejected");
+    expect(a.decided_by_kind).toBe("policy");
+  });
+
+  it("ignores policies from another project", () => {
+    seedProject("acme");
+    seedProject("other");
+    createPolicy({
+      project_slug: "other",
+      action_type: "bid_change",
+      agent_id: null,
+      max_cost_usd: null,
+      auto_decision: "approve",
+      created_by_kind: "user",
+    });
+    const a = createApproval({
+      project_slug: "acme",
+      agent_id: "acme-google-ads",
+      action_summary: "bid",
+      action_type: "bid_change",
+      cost_estimate_usd: 1,
+      payload: {},
+    });
+    expect(a.status).toBe("pending");
+  });
+
+  it("prefers an agent-scoped policy over a wildcard policy", () => {
+    seedProject();
+    createPolicy({
+      project_slug: "acme",
+      action_type: "bid_change",
+      agent_id: null,
+      max_cost_usd: null,
+      auto_decision: "approve",
+      note: "wildcard",
+      created_by_kind: "user",
+    });
+    const scoped = createPolicy({
+      project_slug: "acme",
+      action_type: "bid_change",
+      agent_id: "acme-google-ads",
+      max_cost_usd: null,
+      auto_decision: "reject",
+      note: "specific reject",
+      created_by_kind: "user",
+    });
+    // Specific reject must win for this agent.
+    const a = createApproval({
+      project_slug: "acme",
+      agent_id: "acme-google-ads",
+      action_summary: "bid",
+      action_type: "bid_change",
+      cost_estimate_usd: 1,
+      payload: {},
+    });
+    expect(a.status).toBe("rejected");
+    expect(a.decided_by_id).toBe(scoped.id);
+  });
+
+  it("persists task_id when provided", () => {
+    seedProject();
+    const a = createApproval({
+      project_slug: "acme",
+      agent_id: "x",
+      task_id: "task-uuid-123",
+      action_summary: "p",
+      action_type: "other",
+      cost_estimate_usd: 0,
+      payload: {},
+    });
+    expect(a.task_id).toBe("task-uuid-123");
+  });
+});
+
+describe("requestApprovalRevision", () => {
+  it("flips pending → revision_requested with a note", () => {
+    seedProject();
+    const a = createApproval({
+      project_slug: "acme",
+      agent_id: "x",
+      action_summary: "p",
+      action_type: "other",
+      cost_estimate_usd: 0,
+      payload: {},
+    });
+    const out = requestApprovalRevision(a.id, {
+      decision_note: "narrow the audience first",
+      decided_by_kind: "user",
+    });
+    expect(out!.status).toBe("revision_requested");
+    expect(out!.decision_note).toBe("narrow the audience first");
+    expect(out!.resolved_at).toBeNull(); // not terminal yet
+  });
+
+  it("no-ops on a non-pending row", () => {
+    seedProject();
+    const a = createApproval({
+      project_slug: "acme",
+      agent_id: "x",
+      action_summary: "p",
+      action_type: "other",
+      cost_estimate_usd: 0,
+      payload: {},
+    });
+    resolveApproval(a.id, "approved");
+    const out = requestApprovalRevision(a.id, {
+      decision_note: "second thoughts",
+      decided_by_kind: "user",
+    });
+    // Status is still approved — revision can't undo a terminal decision.
+    expect(out!.status).toBe("approved");
+  });
+
+  it("approved/rejected work after revision_requested transition (pending+revision_requested both resolvable)", () => {
+    seedProject();
+    const a = createApproval({
+      project_slug: "acme",
+      agent_id: "x",
+      action_summary: "p",
+      action_type: "other",
+      cost_estimate_usd: 0,
+      payload: {},
+    });
+    requestApprovalRevision(a.id, {
+      decision_note: "smaller scope",
+      decided_by_kind: "user",
+    });
+    const out = resolveApproval(a.id, "approved");
+    expect(out!.status).toBe("approved");
+  });
+});
+
+describe("listActionableApprovals + listResolvedApprovals + actionableApprovalCount", () => {
+  it("actionable includes pending and revision_requested but not terminal", () => {
+    seedProject();
+    const pending = createApproval({
+      project_slug: "acme",
+      agent_id: "x",
+      action_summary: "pending",
+      action_type: "other",
+      cost_estimate_usd: 0,
+      payload: {},
+    });
+    const revising = createApproval({
+      project_slug: "acme",
+      agent_id: "x",
+      action_summary: "revising",
+      action_type: "other",
+      cost_estimate_usd: 0,
+      payload: {},
+    });
+    requestApprovalRevision(revising.id, {
+      decision_note: "x",
+      decided_by_kind: "user",
+    });
+    const approved = createApproval({
+      project_slug: "acme",
+      agent_id: "x",
+      action_summary: "approved",
+      action_type: "other",
+      cost_estimate_usd: 0,
+      payload: {},
+    });
+    resolveApproval(approved.id, "approved");
+
+    const ids = listActionableApprovals("acme")
+      .map((a) => a.id)
+      .sort();
+    expect(ids).toEqual([pending.id, revising.id].sort());
+    expect(actionableApprovalCount("acme")).toBe(2);
+  });
+
+  it("resolved lists approved/rejected/expired, excluding pending+revision_requested", () => {
+    seedProject();
+    const a = createApproval({
+      project_slug: "acme",
+      agent_id: "x",
+      action_summary: "p1",
+      action_type: "other",
+      cost_estimate_usd: 0,
+      payload: {},
+    });
+    const b = createApproval({
+      project_slug: "acme",
+      agent_id: "x",
+      action_summary: "p2",
+      action_type: "other",
+      cost_estimate_usd: 0,
+      payload: {},
+    });
+    resolveApproval(a.id, "approved");
+    resolveApproval(b.id, "rejected");
+
+    const resolved = listResolvedApprovals("acme");
+    const statuses = new Set(resolved.map((r) => r.status));
+    expect(statuses).toEqual(new Set(["approved", "rejected"]));
+  });
+});
+
+describe("appendComment + listComments", () => {
+  it("round-trips a comment with author metadata", () => {
+    seedProject();
+    const a = createApproval({
+      project_slug: "acme",
+      agent_id: "x",
+      action_summary: "p",
+      action_type: "other",
+      cost_estimate_usd: 0,
+      payload: {},
+    });
+    appendComment({
+      approval_id: a.id,
+      author_kind: "user",
+      author_id: "alice",
+      body: "let's push back here",
+    });
+    const c = listComments(a.id);
+    expect(c).toHaveLength(1);
+    expect(c[0]!.author_kind).toBe("user");
+    expect(c[0]!.author_id).toBe("alice");
+    expect(c[0]!.body).toBe("let's push back here");
+  });
+
+  it("orders comments by created_at ASC (chat-like)", () => {
+    seedProject();
+    const a = createApproval({
+      project_slug: "acme",
+      agent_id: "x",
+      action_summary: "p",
+      action_type: "other",
+      cost_estimate_usd: 0,
+      payload: {},
+    });
+    appendComment({ approval_id: a.id, author_kind: "user", body: "first" });
+    appendComment({ approval_id: a.id, author_kind: "agent", author_id: "bot", body: "second" });
+    appendComment({ approval_id: a.id, author_kind: "system", body: "third" });
+    const ordered = listComments(a.id).map((c) => c.body);
+    expect(ordered).toEqual(["first", "second", "third"]);
+  });
+
+  it("comments cascade-delete with the parent approval", () => {
+    seedProject();
+    const a = createApproval({
+      project_slug: "acme",
+      agent_id: "x",
+      action_summary: "p",
+      action_type: "other",
+      cost_estimate_usd: 0,
+      payload: {},
+    });
+    appendComment({ approval_id: a.id, author_kind: "user", body: "hi" });
+    testDb.prepare("DELETE FROM approvals WHERE id = ?").run(a.id);
+    expect(listComments(a.id)).toEqual([]);
+  });
+});
+
+describe("policies CRUD + findMatchingPolicy", () => {
+  it("creates + lists + deletes a policy", () => {
+    seedProject();
+    const p = createPolicy({
+      project_slug: "acme",
+      action_type: "spend",
+      agent_id: null,
+      max_cost_usd: 100,
+      auto_decision: "approve",
+      note: "anything under $100",
+      created_by_kind: "user",
+    });
+    expect(listPolicies("acme")).toHaveLength(1);
+    expect(listPolicies("acme")[0]!.id).toBe(p.id);
+    expect(deletePolicy(p.id)).toBe(true);
+    expect(listPolicies("acme")).toHaveLength(0);
+    expect(deletePolicy("missing")).toBe(false);
+  });
+
+  it("findMatchingPolicy respects cost cap (≤ semantics)", () => {
+    seedProject();
+    createPolicy({
+      project_slug: "acme",
+      action_type: "spend",
+      agent_id: null,
+      max_cost_usd: 100,
+      auto_decision: "approve",
+      created_by_kind: "user",
+    });
+    // 100 is OK (≤ cap), 101 is not.
+    expect(findMatchingPolicy("acme", "spend", "x", 100)).not.toBeNull();
+    expect(findMatchingPolicy("acme", "spend", "x", 99.99)).not.toBeNull();
+    expect(findMatchingPolicy("acme", "spend", "x", 100.01)).toBeNull();
+  });
+
+  it("findMatchingPolicy returns null when project, type, or agent mismatch", () => {
+    seedProject("acme");
+    seedProject("other");
+    createPolicy({
+      project_slug: "acme",
+      action_type: "spend",
+      agent_id: "agent-1",
+      max_cost_usd: null,
+      auto_decision: "approve",
+      created_by_kind: "user",
+    });
+    expect(findMatchingPolicy("other", "spend", "agent-1", 0)).toBeNull();
+    expect(findMatchingPolicy("acme", "bid_change", "agent-1", 0)).toBeNull();
+    expect(findMatchingPolicy("acme", "spend", "agent-2", 0)).toBeNull();
+  });
+});
+
+describe("getApproval", () => {
+  it("returns the row by id", () => {
+    seedProject();
+    const a = createApproval({
+      project_slug: "acme",
+      agent_id: "x",
+      action_summary: "p",
+      action_type: "other",
+      cost_estimate_usd: 0,
+      payload: {},
+    });
+    expect(getApproval(a.id)?.id).toBe(a.id);
+  });
+  it("returns null for unknown id", () => {
+    expect(getApproval("nope")).toBeNull();
   });
 });

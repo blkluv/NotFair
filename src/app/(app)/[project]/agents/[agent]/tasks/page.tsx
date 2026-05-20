@@ -3,14 +3,15 @@ import { notFound } from "next/navigation";
 import { AgentTaskWorkspace } from "@/components/agent-task-workspace";
 import { getProject } from "@/server/db/projects";
 import { resolveAgentBySlug } from "@/server/agent-meta";
+import { listApprovalsForTask } from "@/server/db/approvals";
 import { getTask, listTasksByAgent, setTaskThreadIfMissing } from "@/server/db/tasks";
 import { buildPendingSessionKey, findSessionBySessionId } from "@/server/openclaw/sessions";
 import {
   readTranscriptTail,
   type TranscriptEvent,
 } from "@/server/openclaw/transcript-tail";
-import { generateTaskThreadId } from "@/server/orchestration/process-blocks";
-import type { Task } from "@/types";
+import { generateTaskThreadId } from "@/server/orchestration/task-kickoff";
+import type { Approval, Task } from "@/types";
 
 type Props = {
   params: Promise<{ agent: string; project: string }>;
@@ -23,6 +24,13 @@ type SelectedBundle = {
   sessionKey: string;
   initialEvents: TranscriptEvent[];
   initialByteOffset: number;
+  /**
+   * Every approval ever requested on this task, newest first. The chat view
+   * renders these above the transcript so the user can act on a pending
+   * approval without leaving the task. Resolved rows show too — they're
+   * the audit trail for "what did I approve here?".
+   */
+  approvals: Approval[];
 };
 
 export default async function AgentTasksPage({ params, searchParams }: Props) {
@@ -87,6 +95,7 @@ async function loadSelectedBundle(
     session?.sessionKey ?? buildPendingSessionKey(agentFullId, threadId);
 
   const { events, byteOffset } = readTranscriptTail(agentFullId, threadId, 0);
+  const approvals = listApprovalsForTask(task.id);
 
   return {
     task,
@@ -94,5 +103,6 @@ async function loadSelectedBundle(
     sessionKey,
     initialEvents: events,
     initialByteOffset: byteOffset,
+    approvals,
   };
 }

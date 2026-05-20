@@ -20,16 +20,22 @@ export type TaskStatus =
   | "proposed"
   | "approved"
   | "running"
+  | "blocked"
   | "succeeded"
   | "failed"
   | "cancelled";
 
 // ┌──────────┐  user approves                ┌──────────┐  agent picks up  ┌─────────┐
-// │ proposed │ ─────────────────────────────▶│ approved │ ────────────────▶│ running │
-// └──────────┘  needs_approval               └──────────┘                   └────┬────┘
-//      │   ▲                                                                     │
-//      │   └── user approves from inbox ──────────────────────────────┐         │
-//      │                                                              │         ▼
+// │ proposed │ ─────────────────────────────▶│ approved │ ────────────────▶│ running │◀─┐
+// └──────────┘  needs_approval               └──────────┘                   └────┬────┘  │
+//      │   ▲                                                                     │       │
+//      │   └── user approves from inbox ──────────────────────────────┐         │       │
+//      │                                                              │         ▼       │
+//      │                                                       ┌───────────────┐        │
+//      │                                                       │   blocked     │────────┘
+//      │                                                       └───────────────┘ approval resolved
+//      │                                                              │
+//      │                                                              ▼
 //      │                                                       ┌───────────────┐
 //      └─ user/CMO cancels ───────────────────────────────────▶│ cancelled / failed / succeeded │
 //                                                              └───────────────┘
@@ -70,7 +76,12 @@ export type Task = {
   updated_at: string;
 };
 
-export type ApprovalStatus = "pending" | "approved" | "rejected" | "expired";
+export type ApprovalStatus =
+  | "pending"
+  | "revision_requested"
+  | "approved"
+  | "rejected"
+  | "expired";
 
 export type ApprovalType =
   | "spend"
@@ -80,18 +91,57 @@ export type ApprovalType =
   | "audience_change"
   | "other";
 
+/** Who made the decision on an approval. 'policy' = auto-decided by a rule. */
+export type ApprovalDecidedByKind = "user" | "agent" | "policy";
+
+/** Author of a comment on an approval thread. 'system' = automated note. */
+export type ApprovalCommentAuthorKind = "user" | "agent" | "system";
+
 export type Approval = {
   id: string;
   project_slug: string;
   agent_id: string;
+  /** Task this approval is gating, if any. Filled when the agent emits
+   *  <request_approval> inside a task context; null for free-standing asks. */
+  task_id: string | null;
   action_summary: string;
   action_type: ApprovalType;
   cost_estimate_usd: number;
   reasoning: string | null;
   payload_json: string;
   status: ApprovalStatus;
+  /** Free-text reason the decider attached on resolve/revision_requested. */
+  decision_note: string | null;
+  decided_by_kind: ApprovalDecidedByKind | null;
+  decided_by_id: string | null;
   created_at: string;
   resolved_at: string | null;
+};
+
+export type ApprovalComment = {
+  id: string;
+  approval_id: string;
+  author_kind: ApprovalCommentAuthorKind;
+  author_id: string | null;
+  body: string;
+  created_at: string;
+};
+
+/** "Always allow / reject" rule consulted before a pending approval is created.
+ *  Matches by (project_slug, action_type) + optional agent_id + optional cost cap. */
+export type ApprovalPolicy = {
+  id: string;
+  project_slug: string;
+  action_type: ApprovalType;
+  /** Restrict to a single agent. Null = applies to any agent in the project. */
+  agent_id: string | null;
+  /** Maximum cost the policy auto-decides for. Null = no cap. */
+  max_cost_usd: number | null;
+  auto_decision: "approve" | "reject";
+  note: string | null;
+  created_at: string;
+  created_by_kind: "user" | "agent";
+  created_by_id: string | null;
 };
 
 export type CostEventSource = "llm" | "google_ads" | "gsc" | "other";

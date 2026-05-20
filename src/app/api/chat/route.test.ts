@@ -33,12 +33,6 @@ vi.mock("@/server/openclaw/gateway-client", () => ({
   streamChatViaGateway: (...args: unknown[]) => streamChatViaGatewayMock(...args),
 }));
 
-const processOrchestrationBlocksMock = vi.fn();
-vi.mock("@/server/orchestration/process-blocks", () => ({
-  processOrchestrationBlocks: (...args: unknown[]) =>
-    processOrchestrationBlocksMock(...args),
-}));
-
 import { POST } from "./route";
 
 function makeProject(overrides: Partial<Project> = {}): Project {
@@ -93,17 +87,6 @@ async function readSse(res: Response): Promise<{
   return { events, raw };
 }
 
-function emptyOrchestrationOutcome() {
-  return {
-    tasks_created: [],
-    task_status_updates: [],
-    comments_added: [],
-    ask_user: [],
-    approvals_requested: [],
-    errors: [],
-  };
-}
-
 // Stream-builder helper: yields the given events one at a time.
 async function* makeAgentStream(
   evts: Array<{
@@ -118,7 +101,6 @@ describe("POST /api/chat", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     streamChatViaGatewayMock.mockReset();
-    processOrchestrationBlocksMock.mockReset();
   });
 
   it("returns 400 when body is not valid JSON", async () => {
@@ -204,10 +186,6 @@ describe("POST /api/chat", () => {
       slug: "cmo",
     });
     streamChatViaGatewayMock.mockReturnValueOnce(makeAgentStream([]));
-    processOrchestrationBlocksMock.mockResolvedValueOnce(
-      emptyOrchestrationOutcome(),
-    );
-
     const res = await POST(
       makeReq({
         message: "hello",
@@ -245,10 +223,6 @@ describe("POST /api/chat", () => {
       pending: false,
     });
     streamChatViaGatewayMock.mockReturnValueOnce(makeAgentStream([]));
-    processOrchestrationBlocksMock.mockResolvedValueOnce(
-      emptyOrchestrationOutcome(),
-    );
-
     const res = await POST(makeReq({ message: "hi", sessionId: "s1" }));
     await readSse(res);
     expect(findSessionBySessionIdMock).toHaveBeenCalledWith("acme-cmo", "s1");
@@ -267,10 +241,6 @@ describe("POST /api/chat", () => {
     });
     findSessionBySessionIdMock.mockReturnValueOnce(null);
     streamChatViaGatewayMock.mockReturnValueOnce(makeAgentStream([]));
-    processOrchestrationBlocksMock.mockResolvedValueOnce(
-      emptyOrchestrationOutcome(),
-    );
-
     const res = await POST(makeReq({ message: "hi", sessionId: "new-id" }));
     await readSse(res);
     expect(buildPendingSessionKeyMock).toHaveBeenCalledWith(
@@ -297,10 +267,6 @@ describe("POST /api/chat", () => {
         { kind: "delta", text: "world!" },
       ]),
     );
-    processOrchestrationBlocksMock.mockResolvedValueOnce(
-      emptyOrchestrationOutcome(),
-    );
-
     const res = await POST(makeReq({ message: "hi", sessionId: "s1" }));
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toBe("text/event-stream");
@@ -354,10 +320,6 @@ describe("POST /api/chat", () => {
         { kind: "lifecycle", phase: "end" },
       ]),
     );
-    processOrchestrationBlocksMock.mockResolvedValueOnce(
-      emptyOrchestrationOutcome(),
-    );
-
     const res = await POST(makeReq({ message: "hi", sessionId: "s1" }));
     const { events } = await readSse(res);
 
@@ -383,10 +345,6 @@ describe("POST /api/chat", () => {
     );
     // The route only invokes orchestration when assistantBuffer has content;
     // an error-only stream skips orchestration entirely.
-    processOrchestrationBlocksMock.mockResolvedValueOnce(
-      emptyOrchestrationOutcome(),
-    );
-
     const res = await POST(makeReq({ message: "hi", sessionId: "s1" }));
     const { events } = await readSse(res);
     const errEvent = events.find((e) => e.event === "error");
@@ -410,10 +368,6 @@ describe("POST /api/chat", () => {
       throw new Error("ws disconnected");
     }
     streamChatViaGatewayMock.mockReturnValueOnce(throwingStream());
-    processOrchestrationBlocksMock.mockResolvedValueOnce(
-      emptyOrchestrationOutcome(),
-    );
-
     const res = await POST(makeReq({ message: "hi", sessionId: "s1" }));
     const { events } = await readSse(res);
     const errEvent = events.find((e) => e.event === "error");
@@ -423,70 +377,12 @@ describe("POST /api/chat", () => {
     );
   });
 
-  it("emits orchestration event when orchestration produces outcomes", async () => {
-    getActiveProjectMock.mockResolvedValueOnce(makeProject({ slug: "acme" }));
-    resolveAgentBySlugMock.mockResolvedValueOnce({
-      agent_id: "acme-cmo",
-      display_name: "CMO",
-      slug: "cmo",
-    });
-    findSessionBySessionIdMock.mockReturnValueOnce(null);
-    streamChatViaGatewayMock.mockReturnValueOnce(
-      makeAgentStream([{ kind: "delta", text: "I'll create a task." }]),
-    );
-    processOrchestrationBlocksMock.mockResolvedValueOnce({
-      tasks_created: [
-        {
-          id: "task-1",
-          title: "Install conversion tracking",
-          agent_id: "acme-google-ads",
-          status: "running",
-        },
-      ],
-      task_status_updates: [],
-      comments_added: [],
-      ask_user: [],
-      approvals_requested: [],
-      errors: [],
-    });
-
-    const res = await POST(makeReq({ message: "hi", sessionId: "s1" }));
-    const { events } = await readSse(res);
-    const orch = events.find((e) => e.event === "orchestration");
-    expect(orch).toBeDefined();
-    const data = orch!.data as {
-      tasks_created: Array<{ id: string; assignee: string }>;
-    };
-    expect(data.tasks_created[0]!.id).toBe("task-1");
-    expect(data.tasks_created[0]!.assignee).toBe("acme-google-ads");
-
-    expect(processOrchestrationBlocksMock).toHaveBeenCalledWith(
-      "I'll create a task.",
-      { project_slug: "acme", agent_id: "acme-cmo" },
-    );
-  });
-
-  it("skips orchestration when the assistant produced no text", async () => {
-    getActiveProjectMock.mockResolvedValueOnce(makeProject({ slug: "acme" }));
-    resolveAgentBySlugMock.mockResolvedValueOnce({
-      agent_id: "acme-cmo",
-      display_name: "CMO",
-      slug: "cmo",
-    });
-    findSessionBySessionIdMock.mockReturnValueOnce(null);
-    streamChatViaGatewayMock.mockReturnValueOnce(
-      makeAgentStream([
-        { kind: "lifecycle", phase: "start" },
-        { kind: "lifecycle", phase: "end" },
-      ]),
-    );
-
-    const res = await POST(makeReq({ message: "hi", sessionId: "s1" }));
-    await readSse(res);
-    expect(processOrchestrationBlocksMock).not.toHaveBeenCalled();
-  });
-
-  it("does NOT emit orchestration event when outcome is empty", async () => {
+  // Orchestration side effects no longer run via post-stream regex parsing —
+  // they happen via the notfair-orchestration MCP server while the agent's
+  // turn is streaming. The chat route is now pure pipe + perf instrumentation,
+  // so the only thing left to assert is that no `orchestration` SSE event is
+  // ever emitted (it's no longer part of the protocol).
+  it("never emits an `orchestration` SSE event (MCP-based now)", async () => {
     getActiveProjectMock.mockResolvedValueOnce(makeProject({ slug: "acme" }));
     resolveAgentBySlugMock.mockResolvedValueOnce({
       agent_id: "acme-cmo",
@@ -497,36 +393,9 @@ describe("POST /api/chat", () => {
     streamChatViaGatewayMock.mockReturnValueOnce(
       makeAgentStream([{ kind: "delta", text: "Just chatting." }]),
     );
-    processOrchestrationBlocksMock.mockResolvedValueOnce(
-      emptyOrchestrationOutcome(),
-    );
-
     const res = await POST(makeReq({ message: "hi", sessionId: "s1" }));
     const { events } = await readSse(res);
     expect(events.find((e) => e.event === "orchestration")).toBeUndefined();
-    // Still ends cleanly with done.
     expect(events.find((e) => e.event === "done")).toBeDefined();
-  });
-
-  it("survives orchestration throwing — chat reply still completes", async () => {
-    getActiveProjectMock.mockResolvedValueOnce(makeProject({ slug: "acme" }));
-    resolveAgentBySlugMock.mockResolvedValueOnce({
-      agent_id: "acme-cmo",
-      display_name: "CMO",
-      slug: "cmo",
-    });
-    findSessionBySessionIdMock.mockReturnValueOnce(null);
-    streamChatViaGatewayMock.mockReturnValueOnce(
-      makeAgentStream([{ kind: "delta", text: "hello" }]),
-    );
-    processOrchestrationBlocksMock.mockRejectedValueOnce(
-      new Error("parse failure"),
-    );
-
-    const res = await POST(makeReq({ message: "hi", sessionId: "s1" }));
-    const { events } = await readSse(res);
-    expect(events.find((e) => e.event === "done")).toBeDefined();
-    // No orchestration event when it failed.
-    expect(events.find((e) => e.event === "orchestration")).toBeUndefined();
   });
 });

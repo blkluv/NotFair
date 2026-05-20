@@ -23,16 +23,18 @@ vi.mock("@/server/openclaw/sessions", () => ({
     `agent:${agent}:${thread}`,
 }));
 
-const processOrchestrationBlocksMock = vi.fn();
+// generateTaskThreadId lives on task-kickoff now. Mock just that one symbol
+// while letting the real buildTaskKickoffMessage run — we want to catch
+// contract drift between run-task and the kickoff format.
 const generateTaskThreadIdMock = vi.fn(() => "thread-fresh");
-vi.mock("./process-blocks", () => ({
-  processOrchestrationBlocks: (...a: unknown[]) =>
-    processOrchestrationBlocksMock(...a),
-  generateTaskThreadId: () => generateTaskThreadIdMock(),
-}));
-
-// task-kickoff is small + pure — let the real implementation run so we don't
-// silently mask a contract change between run-task and the kickoff message.
+vi.mock("./task-kickoff", async () => {
+  const actual =
+    await vi.importActual<typeof import("./task-kickoff")>("./task-kickoff");
+  return {
+    ...actual,
+    generateTaskThreadId: () => generateTaskThreadIdMock(),
+  };
+});
 
 import { runTaskKickoffServerSide, startTaskIfProposed } from "./run-task";
 
@@ -120,22 +122,13 @@ describe("startTaskIfProposed", () => {
 describe("runTaskKickoffServerSide", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    processOrchestrationBlocksMock.mockResolvedValue({
-      tasks_created: [],
-      task_status_updates: [],
-      comments_added: [],
-      ask_user: [],
-      approvals_requested: [],
-      errors: [],
-    });
   });
 
-  it("consumes the gateway stream, accumulates deltas, and forwards them to orchestration", async () => {
+  it("consumes the gateway stream and passes the kickoff message + session context", async () => {
     streamChatViaGatewayMock.mockImplementation(() =>
       eventStream([
-        { kind: "delta", text: "On it. " },
-        { kind: "delta", text: "Wrapping up.\n" },
-        { kind: "delta", text: "<task_status>\ntask_id: task-1\nstatus: done\n</task_status>" },
+        { kind: "delta", text: "On it." },
+        { kind: "delta", text: " Wrapping up." },
       ]),
     );
 
@@ -152,14 +145,10 @@ describe("runTaskKickoffServerSide", () => {
         message: expect.stringContaining("Add the Google Ads conversion tag."),
       }),
     );
-    expect(call?.[0].message).toContain("Task ID: task-1");
+    expect(call?.[0].message).toContain("task_id:      task-1");
 
-    // Orchestration sees the full accumulated buffer and the correct context.
-    expect(processOrchestrationBlocksMock).toHaveBeenCalledWith(
-      "On it. Wrapping up.\n<task_status>\ntask_id: task-1\nstatus: done\n</task_status>",
-      { project_slug: "demo", agent_id: "demo-google-ads" },
-    );
-
+    // run-task no longer post-processes the buffer — side effects now happen
+    // via MCP tool calls during the stream.
     expect(updateTaskMock).not.toHaveBeenCalled();
   });
 
@@ -190,7 +179,7 @@ describe("runTaskKickoffServerSide", () => {
     expect(streamChatViaGatewayMock).not.toHaveBeenCalled();
   });
 
-  it("on gateway error event: marks task failed and skips orchestration", async () => {
+  it("on gateway error event: marks task failed with the gateway's message", async () => {
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     streamChatViaGatewayMock.mockImplementation(() =>
       eventStream([
@@ -208,7 +197,6 @@ describe("runTaskKickoffServerSide", () => {
         error_message: "gateway exploded",
       }),
     );
-    expect(processOrchestrationBlocksMock).not.toHaveBeenCalled();
     errSpy.mockRestore();
   });
 
@@ -252,7 +240,7 @@ describe("runTaskKickoffServerSide", () => {
     errSpy.mockRestore();
   });
 
-  it("skips orchestration entirely when the buffered text is blank", async () => {
+  it("no-ops cleanly when the stream is blank (no failure update)", async () => {
     streamChatViaGatewayMock.mockImplementation(() =>
       eventStream([
         { kind: "delta", text: "   " },
@@ -260,23 +248,7 @@ describe("runTaskKickoffServerSide", () => {
       ]),
     );
     await runTaskKickoffServerSide(makeTask());
-    expect(processOrchestrationBlocksMock).not.toHaveBeenCalled();
     expect(updateTaskMock).not.toHaveBeenCalled();
-  });
-
-  it("logs but does not rethrow when orchestration processing itself fails", async () => {
-    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    streamChatViaGatewayMock.mockImplementation(() =>
-      eventStream([{ kind: "delta", text: "hello" }]),
-    );
-    processOrchestrationBlocksMock.mockRejectedValue(new Error("parse boom"));
-
-    await expect(runTaskKickoffServerSide(makeTask())).resolves.toBeUndefined();
-    expect(errSpy).toHaveBeenCalledWith(
-      expect.stringContaining("orchestration processing failed"),
-      expect.any(Error),
-    );
-    errSpy.mockRestore();
   });
 
   it("keeps the existing thread_id when the task already has one (no lazy mint)", async () => {

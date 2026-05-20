@@ -32,10 +32,6 @@ vi.mock("@/components/markdown", () => ({
   ),
 }));
 
-vi.mock("@/server/orchestration/blocks", () => ({
-  stripOrchestrationBlocks: (s: string) => s,
-}));
-
 import { LiveTranscript } from "./live-transcript";
 import type { TranscriptEvent } from "@/server/openclaw/transcript-tail";
 
@@ -213,18 +209,12 @@ describe("LiveTranscript rendering events", () => {
     expect(screen.getByText(/2 steps/i)).toBeInTheDocument();
   });
 
-  it("ignores assistant text that becomes empty after orchestration stripping", async () => {
-    // Override the mock just for this test by temporarily replacing strip fn.
-    const blocks = await import("@/server/orchestration/blocks");
-    const spy = vi
-      .spyOn(blocks, "stripOrchestrationBlocks")
-      .mockImplementation(() => "   ");
+  it("renders nothing for an assistant message whose body is whitespace-only", () => {
     const events: TranscriptEvent[] = [
-      { kind: "assistant_text", id: "a1", ts: 1, body: "<task>only block</task>" },
+      { kind: "assistant_text", id: "a1", ts: 1, body: "   " },
     ];
     render(<LiveTranscript {...defaultProps({ initialEvents: events, threadId: "t-strip" })} />);
     expect(screen.queryByTestId("markdown")).not.toBeInTheDocument();
-    spy.mockRestore();
   });
 
   it("returns null for system 'unknown' events (renders no row)", () => {

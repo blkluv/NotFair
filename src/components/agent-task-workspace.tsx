@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { ApprovalCard } from "@/components/approval-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { LiveTranscript } from "@/components/live-transcript";
@@ -22,12 +23,13 @@ import { cancelTaskAction } from "@/server/actions/tasks";
 import { cn } from "@/lib/utils";
 import { projectHref } from "@/lib/project-href";
 import type { TranscriptEvent } from "@/server/openclaw/transcript-tail";
-import type { Task, TaskStatus } from "@/types";
+import type { Approval, Task, TaskStatus } from "@/types";
 
-const TASK_IN_FLIGHT: TaskStatus[] = ["proposed", "approved", "running"];
+const TASK_IN_FLIGHT: TaskStatus[] = ["proposed", "approved", "running", "blocked"];
 
 const STATUS_GROUPS: Array<{ status: TaskStatus; label: string }> = [
   { status: "running", label: "Running" },
+  { status: "blocked", label: "Waiting on approval" },
   { status: "proposed", label: "Proposed" },
   { status: "approved", label: "Approved" },
   { status: "succeeded", label: "Done" },
@@ -42,6 +44,7 @@ const STATUS_VARIANT: Record<
   proposed: "outline",
   approved: "secondary",
   running: "default",
+  blocked: "secondary",
   succeeded: "secondary",
   failed: "destructive",
   cancelled: "outline",
@@ -53,6 +56,9 @@ type SelectedTaskBundle = {
   sessionKey: string;
   initialEvents: TranscriptEvent[];
   initialByteOffset: number;
+  /** Approvals attached to this task, newest first. Rendered above the
+   *  transcript so the user can act on a pending one without leaving the chat. */
+  approvals: Approval[];
 };
 
 type Props = {
@@ -295,19 +301,52 @@ function SelectedTaskPanel({
     },
     [isInFlight, router],
   );
+  // Surface the actionable approval up front so the user doesn't have to
+  // navigate to /approvals to unblock the agent. Resolved rows would only
+  // add noise here, so they're filtered out — the audit trail lives on the
+  // dedicated Resolved tab. Most blocked tasks have exactly one pending
+  // request at a time; render whichever's actionable, plus any
+  // revision_requested that's still in play.
+  const liveApprovals = selected.approvals.filter(
+    (a) => a.status === "pending" || a.status === "revision_requested",
+  );
+  // When the task is parked in `blocked`, build a short "why" string so the
+  // LiveTranscript can replace its forward-motion indicator ("thinking…",
+  // "wrapping up…") with an honest paused-state pill. The most common reason
+  // is a pending approval, and we have those right here.
+  const blockedReason =
+    selected.task.status === "blocked"
+      ? liveApprovals.length > 0
+        ? liveApprovals.length === 1
+          ? "waiting on approval"
+          : `waiting on ${liveApprovals.length} approvals`
+        : "waiting for the gating condition to resolve"
+      : undefined;
   return (
-    <LiveTranscript
-      key={selected.task.id}
-      projectSlug={projectSlug}
-      agentSlug={agentSlug}
-      agentDisplayName={agentDisplayName}
-      threadId={selected.threadId}
-      sessionKey={selected.sessionKey}
-      initialEvents={selected.initialEvents}
-      initialByteOffset={selected.initialByteOffset}
-      composerDisabled={isInFlight}
-      onPolled={onPolled}
-    />
+    <div className="flex h-full min-h-0 flex-col">
+      {liveApprovals.length > 0 && (
+        <div className="mx-auto w-full max-w-3xl space-y-3 px-6 pt-4">
+          {liveApprovals.map((a) => (
+            <ApprovalCard key={a.id} approval={a} />
+          ))}
+        </div>
+      )}
+      <div className="min-h-0 flex-1">
+        <LiveTranscript
+          key={selected.task.id}
+          projectSlug={projectSlug}
+          agentSlug={agentSlug}
+          agentDisplayName={agentDisplayName}
+          threadId={selected.threadId}
+          sessionKey={selected.sessionKey}
+          initialEvents={selected.initialEvents}
+          initialByteOffset={selected.initialByteOffset}
+          composerDisabled={isInFlight}
+          blockedReason={blockedReason}
+          onPolled={onPolled}
+        />
+      </div>
+    </div>
   );
 }
 
@@ -425,6 +464,8 @@ function StatusGlyph({ status }: { status: TaskStatus }) {
       return <CircleDot className="size-3.5 text-sky-600" />;
     case "running":
       return <Loader2 className="size-3.5 animate-spin text-sky-600" />;
+    case "blocked":
+      return <CircleDot className="size-3.5 text-amber-600" />;
     case "proposed":
     default:
       return <Circle className="size-3.5 text-muted-foreground" />;

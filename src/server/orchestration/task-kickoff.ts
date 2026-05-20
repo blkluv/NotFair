@@ -1,4 +1,17 @@
+import { randomUUID } from "node:crypto";
+
 import type { Task } from "@/types";
+
+/**
+ * Generate a UUID for a per-task chat thread. Stable per-call; callers
+ * persist it via setTaskThreadIfMissing once they decide to materialize
+ * the thread (typically on the first /tasks/[id] page visit, or when
+ * approval-wakeup needs to push a system message into a task that's
+ * never been opened in the UI).
+ */
+export function generateTaskThreadId(): string {
+  return randomUUID();
+}
 
 /**
  * Build the hidden kickoff message the assignee receives on first open of
@@ -14,8 +27,10 @@ export function buildTaskKickoffMessage(task: Task): string {
   const lines: string[] = [
     "(task assignment)",
     "",
-    `Task ID: ${task.id}`,
-    `Title: ${task.title ?? "(untitled)"}`,
+    `project_slug: ${task.project_slug}`,
+    `agent_id:     ${task.agent_id}`,
+    `task_id:      ${task.id}`,
+    `Title:        ${task.title ?? "(untitled)"}`,
     "",
     "Brief:",
     task.brief,
@@ -26,21 +41,9 @@ export function buildTaskKickoffMessage(task: Task): string {
   }
   lines.push(
     "Acknowledge this task in 1-2 sentences (what you'll do + roughly how",
-    "long), then start working. Use your tools (MCP, exec, etc.) to actually",
-    "do the thing — don't just describe what you'd do.",
-    "",
-    "When the task is complete, emit at the END of your reply:",
-    "",
-    "<task_status>",
-    `task_id: ${task.id}`,
-    "status: done",
-    "summary: <one line on what you did>",
-    "</task_status>",
-    "",
-    "If you hit a real blocker, emit status: blocked + an <ask_user> or",
-    "<add_comment> to the CMO. If you need user sign-off on a governed",
-    "action (spend, content publish, bid change), use <request_approval>",
-    "before executing.",
+    "long), then start working. Use your domain tools to actually do the",
+    "thing — don't just describe what you'd do. Close the task out when",
+    "you're done.",
   );
   return lines.join("\n");
 }

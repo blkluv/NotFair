@@ -1,9 +1,10 @@
 /**
  * Build the brief for the CMO's first task — the audit that used to be its
  * own special-purpose code path in src/server/onboarding/audit.ts. Now the
- * audit IS a task: the CMO does the GAQL probes itself using the Google
- * Ads MCP, writes findings inline, and delegates ongoing work via
- * <create_task> blocks the same way it would for any other planning turn.
+ * audit IS a task: the CMO does the GAQL probes itself via the Google Ads
+ * MCP, writes findings inline, and delegates ongoing work via the
+ * notfair-orchestration MCP tools (the same surface the CMO uses for every
+ * other planning turn — see agent-templates.ts for the full teaching).
  *
  * Keeping this server-side so the wording stays in lockstep with the CMO
  * system prompt; templated rather than free-form so each new project
@@ -14,9 +15,7 @@ export function buildOnboardingBrief(args: {
   project_display_name: string;
   google_ads_account_id: string | null;
 }): { title: string; brief: string; success_criteria: string } {
-  const account =
-    args.google_ads_account_id ??
-    "(none picked — ask the user via <ask_user> before running probes)";
+  const account = args.google_ads_account_id ?? "(none picked — ask the user)";
 
   const title = "Audit the account and propose a starter playbook";
 
@@ -26,7 +25,7 @@ export function buildOnboardingBrief(args: {
     "",
     "This is your first turn as CMO for this project. Audit the connected",
     "Google Ads account, present findings, then delegate ongoing work to",
-    "the google-ads specialist via <create_task> blocks.",
+    "the google-ads specialist.",
     "",
     "## 1. Probe the account",
     "",
@@ -62,21 +61,19 @@ export function buildOnboardingBrief(args: {
     "",
     "## 4. Delegate the ongoing work",
     "",
-    "For each Next Step that's actionable + repeatable, emit a <create_task>",
-    "block assigned to google_ads. Include the cadence in the brief itself",
-    "(\"daily 9am Pacific anomaly check on enabled campaigns\", \"weekly",
-    "Monday search-term review\", etc.) — the specialist will schedule it.",
+    "For each Next Step that's actionable + repeatable, delegate it to the",
+    "google_ads specialist. Include the cadence in the brief itself (\"daily",
+    "9am Pacific anomaly check on enabled campaigns\", \"weekly Monday",
+    "search-term review\", etc.) — the specialist will schedule its own cron.",
     "",
-    "Tight one-line tail after the create_task blocks: \"Handed these to",
-    "your Google Ads specialist — open the agent's Tasks tab to follow",
-    'along."',
+    "Tight one-line tail after delegating: \"Handed these to your Google Ads",
+    'specialist — open the agent\'s Tasks tab to follow along."',
   ].join("\n");
 
   const success_criteria = [
-    "Findings reported as inline markdown, one or more <create_task> blocks",
-    "emitted for ongoing work (skip when archetype = empty + no creative",
-    "approach is possible without account spend), <task_status>status: done</task_status>",
-    "at the end.",
+    "Findings reported as inline markdown; ongoing work delegated to",
+    "google_ads (skip delegation when archetype = empty); this audit task",
+    "marked done.",
   ].join(" ");
 
   return { title, brief, success_criteria };

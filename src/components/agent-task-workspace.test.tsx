@@ -262,7 +262,7 @@ describe("AgentTaskWorkspace selected-task panel", () => {
             threadId: "thr-1",
             sessionKey: "agent:demo-google-ads:thr-1",
             initialEvents: [],
-            initialByteOffset: 0,
+            initialByteOffset: 0, approvals: [],
           },
         })}
       />,
@@ -286,7 +286,7 @@ describe("AgentTaskWorkspace selected-task panel", () => {
             threadId: "thr-1",
             sessionKey: "agent:demo-google-ads:thr-1",
             initialEvents: [],
-            initialByteOffset: 0,
+            initialByteOffset: 0, approvals: [],
           },
         })}
       />,
@@ -309,7 +309,7 @@ describe("AgentTaskWorkspace selected-task panel", () => {
             threadId: "thr-1",
             sessionKey: "k",
             initialEvents: [],
-            initialByteOffset: 0,
+            initialByteOffset: 0, approvals: [],
           },
         })}
       />,
@@ -330,7 +330,7 @@ describe("AgentTaskWorkspace selected-task panel", () => {
             threadId: "thr-1",
             sessionKey: "k",
             initialEvents: [],
-            initialByteOffset: 0,
+            initialByteOffset: 0, approvals: [],
           },
         })}
       />,
@@ -351,7 +351,7 @@ describe("AgentTaskWorkspace CancelTaskButton", () => {
             threadId: "thr",
             sessionKey: "k",
             initialEvents: [],
-            initialByteOffset: 0,
+            initialByteOffset: 0, approvals: [],
           },
         })}
       />,

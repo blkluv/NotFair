@@ -17,7 +17,9 @@ import {
   inFlightCountsByAgent,
   listTasks,
   listTasksByAgent,
+  markTaskBlocked,
   setTaskThreadIfMissing,
+  unblockTask,
   updateTask,
 } from "./tasks";
 
@@ -437,5 +439,59 @@ describe("claimProposedTask", () => {
     const t = createTask({ project_slug: "acme", agent_id: "x", brief: "b" });
     expect(claimProposedTask(t.id)!.status).toBe("running");
     expect(claimProposedTask(t.id)).toBeNull();
+  });
+});
+
+describe("markTaskBlocked + unblockTask", () => {
+  it("flips a running task to blocked, then unblockTask flips it back to running", () => {
+    seedProject();
+    const t = createTask({ project_slug: "acme", agent_id: "x", brief: "b" });
+    claimProposedTask(t.id); // proposed → running
+    const blocked = markTaskBlocked(t.id);
+    expect(blocked?.status).toBe("blocked");
+    const unblocked = unblockTask(t.id);
+    expect(unblocked?.status).toBe("running");
+  });
+
+  it("markTaskBlocked accepts proposed + approved as source states", () => {
+    seedProject();
+    const a = createTask({ project_slug: "acme", agent_id: "x", brief: "a" });
+    // proposed → blocked
+    expect(markTaskBlocked(a.id)?.status).toBe("blocked");
+
+    const b = createTask({
+      project_slug: "acme",
+      agent_id: "x",
+      brief: "b",
+      status: "approved",
+    });
+    expect(markTaskBlocked(b.id)?.status).toBe("blocked");
+  });
+
+  it("markTaskBlocked does NOT regress a terminal task", () => {
+    seedProject();
+    const t = createTask({
+      project_slug: "acme",
+      agent_id: "x",
+      brief: "b",
+      status: "succeeded",
+    });
+    const after = markTaskBlocked(t.id);
+    expect(after?.status).toBe("succeeded");
+  });
+
+  it("unblockTask is a no-op when the task isn't blocked", () => {
+    seedProject();
+    const t = createTask({ project_slug: "acme", agent_id: "x", brief: "b" });
+    claimProposedTask(t.id);
+    const after = unblockTask(t.id);
+    expect(after?.status).toBe("running"); // unchanged
+  });
+
+  it("inFlightCountsByAgent counts blocked tasks too", () => {
+    seedProject();
+    const t = createTask({ project_slug: "acme", agent_id: "agent-1", brief: "b" });
+    markTaskBlocked(t.id);
+    expect(inFlightCountsByAgent("acme").get("agent-1")).toBe(1);
   });
 });

@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import { listProjects } from "@/server/db/projects";
 import { getActiveProject } from "@/server/active-project";
-import { pendingApprovalCount } from "@/server/db/approvals";
+import { actionableApprovalCount } from "@/server/db/approvals";
 import { listProjectAgents } from "@/server/agent-meta";
 import { inFlightCountsByAgent } from "@/server/db/tasks";
 import { projectHref } from "@/lib/project-href";
@@ -56,7 +56,8 @@ const NAV: NavItem[] = [
 export async function AppSidebar() {
   const projects = listProjects();
   const active = await getActiveProject();
-  const approvalsBadge = active ? pendingApprovalCount(active.slug) : 0;
+  // Badge counts anything actionable: pending + revision_requested.
+  const approvalsBadge = active ? actionableApprovalCount(active.slug) : 0;
   const agentEntries = active ? await listProjectAgents(active.slug) : [];
   const inFlightCounts: Record<string, number> = {};
   if (active) {

@@ -156,7 +156,7 @@ export function inFlightCountsByAgent(
     .prepare(
       `SELECT agent_id, COUNT(*) as count
        FROM tasks
-       WHERE project_slug = ? AND status IN ('proposed', 'approved', 'running')
+       WHERE project_slug = ? AND status IN ('proposed', 'approved', 'running', 'blocked')
        GROUP BY agent_id`,
     )
     .all(project_slug) as Array<{ agent_id: string; count: number }>;
@@ -206,5 +206,32 @@ export function claimProposedTask(id: string): Task | null {
     )
     .run(now, id);
   if (info.changes === 0) return null;
+  return getTask(id);
+}
+
+/**
+ * Flip a running task to `blocked` (waiting on an approval). Only transitions
+ * from `running` or `proposed` so we don't undo a terminal state. Returns
+ * the post-flip row, or the current row when the transition didn't apply.
+ */
+export function markTaskBlocked(id: string): Task | null {
+  const db = getDb();
+  const now = new Date().toISOString();
+  db.prepare(
+    "UPDATE tasks SET status = 'blocked', updated_at = ? WHERE id = ? AND status IN ('running','proposed','approved')",
+  ).run(now, id);
+  return getTask(id);
+}
+
+/**
+ * Flip a blocked task back to running once its approval resolves. No-op when
+ * the task isn't blocked (e.g., already terminal because the user cancelled).
+ */
+export function unblockTask(id: string): Task | null {
+  const db = getDb();
+  const now = new Date().toISOString();
+  db.prepare(
+    "UPDATE tasks SET status = 'running', updated_at = ? WHERE id = ? AND status = 'blocked'",
+  ).run(now, id);
   return getTask(id);
 }

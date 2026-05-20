@@ -34,8 +34,10 @@ describe("buildTaskKickoffMessage", () => {
   it("includes the canonical task fields in a stable order", () => {
     const msg = buildTaskKickoffMessage(makeTask());
     // Each piece appears, and the brief comes before success criteria.
-    expect(msg).toContain("Task ID: task-123");
-    expect(msg).toContain("Title: Install conversion tracking");
+    expect(msg).toContain("task_id:      task-123");
+    expect(msg).toContain("project_slug: demo");
+    expect(msg).toContain("agent_id:     demo-google-ads");
+    expect(msg).toContain("Title:        Install conversion tracking");
     expect(msg).toContain("Brief:");
     expect(msg).toContain("Add the Google Ads conversion tag to /thanks.");
     expect(msg).toContain("Success criteria:");
@@ -47,7 +49,7 @@ describe("buildTaskKickoffMessage", () => {
 
   it("falls back to '(untitled)' when title is null", () => {
     const msg = buildTaskKickoffMessage(makeTask({ title: null }));
-    expect(msg).toContain("Title: (untitled)");
+    expect(msg).toContain("Title:        (untitled)");
   });
 
   it("omits the Success criteria section entirely when success_criteria is null", () => {
@@ -59,32 +61,26 @@ describe("buildTaskKickoffMessage", () => {
     expect(msg).toContain("Acknowledge this task");
   });
 
-  it("teaches the agent the <task_status> done emission contract with the right task_id", () => {
-    const msg = buildTaskKickoffMessage(makeTask({ id: "task-xyz" }));
-    expect(msg).toContain("<task_status>");
-    expect(msg).toContain("task_id: task-xyz");
-    expect(msg).toContain("status: done");
-    expect(msg).toContain("</task_status>");
-  });
-
-  it("mentions the blocked/ask_user/request_approval escape hatches so agents know how to bail", () => {
+  it("tells the agent to actually use its tools, not just describe, and to close out when done", () => {
     const msg = buildTaskKickoffMessage(makeTask());
-    expect(msg).toMatch(/status:\s*blocked/);
-    expect(msg).toContain("<ask_user>");
-    expect(msg).toContain("<add_comment>");
-    expect(msg).toContain("<request_approval>");
-  });
-
-  it("tells the agent to actually use its tools, not just describe", () => {
-    const msg = buildTaskKickoffMessage(makeTask());
-    expect(msg).toContain("Use your tools");
+    expect(msg).toContain("Use your domain tools");
     expect(msg).toContain("don't just describe what you'd do");
+    expect(msg).toMatch(/close the task out/i);
+  });
+
+  it("does NOT re-teach the MCP tool surface — that's the system prompt's job", () => {
+    const msg = buildTaskKickoffMessage(makeTask());
+    // Schema-shaped lines like `status: "done"` belong in the system prompt;
+    // every brief shouldn't duplicate them. Same for the pseudo-XML rule.
+    expect(msg).not.toMatch(/status:\s*"done"/);
+    expect(msg).not.toMatch(/do NOT emit/i);
+    expect(msg).not.toContain("not parsed");
   });
 
   it("returns a multi-line string (joined with \\n, not \\r\\n)", () => {
     const msg = buildTaskKickoffMessage(makeTask());
     expect(msg).not.toContain("\r");
-    expect(msg.split("\n").length).toBeGreaterThan(10);
+    expect(msg.split("\n").length).toBeGreaterThan(6);
   });
 
   it("preserves multi-line brief content verbatim", () => {

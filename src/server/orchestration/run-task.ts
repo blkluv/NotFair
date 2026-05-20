@@ -5,8 +5,10 @@ import { streamChatViaGateway } from "@/server/openclaw/gateway-client";
 import { claimProposedTask, setTaskThreadIfMissing, updateTask } from "@/server/db/tasks";
 import type { Task } from "@/types";
 
-import { generateTaskThreadId, processOrchestrationBlocks } from "./process-blocks";
-import { buildTaskKickoffMessage } from "./task-kickoff";
+import {
+  buildTaskKickoffMessage,
+  generateTaskThreadId,
+} from "./task-kickoff";
 
 /**
  * Idempotent "claim and kickoff" — atomically flips a proposed task to
@@ -55,14 +57,16 @@ export async function runTaskKickoffServerSide(task: Task): Promise<void> {
   const sessionKey = buildPendingSessionKey(finalTask.agent_id, finalTask.thread_id);
   const kickoffMessage = buildTaskKickoffMessage(finalTask);
 
-  let buffer = "";
+  // We drain the stream so the agent's turn fully runs, but we no longer
+  // post-process the buffer for pseudo-XML blocks — any side effects
+  // (task_status, comments, approvals) happen via the agent calling
+  // notfair-orchestration MCP tools mid-stream.
   try {
     for await (const evt of streamChatViaGateway({
       sessionKey,
       sessionId: finalTask.thread_id,
       message: kickoffMessage,
     })) {
-      if (evt.kind === "delta") buffer += evt.text;
       if (evt.kind === "error") {
         throw new Error(evt.message);
       }
@@ -74,20 +78,5 @@ export async function runTaskKickoffServerSide(task: Task): Promise<void> {
       status: "failed",
       error_message: message,
     });
-    return;
-  }
-
-  if (buffer.trim().length > 0) {
-    try {
-      await processOrchestrationBlocks(buffer, {
-        project_slug: finalTask.project_slug,
-        agent_id: finalTask.agent_id,
-      });
-    } catch (err) {
-      console.error(
-        `[run-task] orchestration processing failed for ${finalTask.id}:`,
-        err,
-      );
-    }
   }
 }
