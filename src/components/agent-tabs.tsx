@@ -23,9 +23,15 @@ const TABS: Tab[] = [
   { key: "settings", label: "Settings", icon: Settings },
 ];
 
-export function AgentTabs({ agentSlug }: { agentSlug: string }) {
+export function AgentTabs({
+  projectSlug,
+  agentSlug,
+}: {
+  projectSlug: string;
+  agentSlug: string;
+}) {
   const pathname = usePathname();
-  const base = `/agents/${agentSlug}`;
+  const base = `/${projectSlug}/agents/${agentSlug}`;
 
   return (
     <nav

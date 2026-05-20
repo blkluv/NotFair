@@ -4,6 +4,7 @@ import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronsUpDown, Plus, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { projectHref } from "@/lib/project-href";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,6 +23,7 @@ export type SessionLite = {
 };
 
 type Props = {
+  projectSlug: string;
   agentSlug: string;
   sessions: SessionLite[];
   activeSessionId: string;
@@ -42,19 +44,28 @@ function displayTitle(s: SessionLite): string {
   return s.label.length > 32 ? `${s.label.slice(0, 32)}...` : s.label;
 }
 
-export function ThreadSelector({ agentSlug, sessions, activeSessionId }: Props) {
+export function ThreadSelector({
+  projectSlug,
+  agentSlug,
+  sessions,
+  activeSessionId,
+}: Props) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const active = sessions.find((s) => s.sessionId === activeSessionId);
 
   function go(sessionId: string) {
     if (sessionId === activeSessionId) return;
-    start(() => router.push(`/agents/${agentSlug}/chat/${sessionId}`));
+    start(() =>
+      router.push(projectHref(projectSlug, `/agents/${agentSlug}/chat/${sessionId}`)),
+    );
   }
 
   function newThread() {
     const id = crypto.randomUUID();
-    start(() => router.push(`/agents/${agentSlug}/chat/${id}`));
+    start(() =>
+      router.push(projectHref(projectSlug, `/agents/${agentSlug}/chat/${id}`)),
+    );
   }
 
   return (

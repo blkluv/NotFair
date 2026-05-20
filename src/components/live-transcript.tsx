@@ -38,10 +38,12 @@ import {
 } from "@/lib/slash-commands";
 import { stripOrchestrationBlocks } from "@/server/orchestration/blocks";
 import type { TranscriptEvent } from "@/server/openclaw/transcript-tail";
+import { projectHref } from "@/lib/project-href";
 
 const POLL_INTERVAL_MS = 2_000;
 
 type Props = {
+  projectSlug: string;
   agentSlug: string;
   agentDisplayName: string;
   /** OpenClaw thread (the URL label half of `agent:<agent>:<label>`). */
@@ -78,6 +80,7 @@ type Props = {
 const KICKOFF_FIRED = new Set<string>();
 
 export function LiveTranscript({
+  projectSlug,
   agentSlug,
   agentDisplayName,
   threadId,
@@ -235,7 +238,9 @@ export function LiveTranscript({
               return;
             case "new-session": {
               const newId = crypto.randomUUID();
-              router.push(`/agents/${agentSlug}/chat/${newId}`);
+              router.push(
+                projectHref(projectSlug, `/agents/${agentSlug}/chat/${newId}`),
+              );
               return;
             }
             case "stop":
@@ -320,7 +325,7 @@ export function LiveTranscript({
         abortRef.current = null;
       }
     },
-    [agentSlug, input, pollOnce, router, sendingChat, sessionKey, threadId],
+    [agentSlug, input, pollOnce, projectSlug, router, sendingChat, sessionKey, threadId],
   );
 
   // ── Auto-kickoff for FIRST_TURN-style flows. ────────────────────────

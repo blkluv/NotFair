@@ -20,6 +20,7 @@ import { RunningDot } from "@/components/running-dot";
 import { StartAllTasksButton } from "@/components/start-all-tasks-button";
 import { cancelTaskAction } from "@/server/actions/tasks";
 import { cn } from "@/lib/utils";
+import { projectHref } from "@/lib/project-href";
 import type { TranscriptEvent } from "@/server/openclaw/transcript-tail";
 import type { Task, TaskStatus } from "@/types";
 
@@ -55,6 +56,7 @@ type SelectedTaskBundle = {
 };
 
 type Props = {
+  projectSlug: string;
   agentSlug: string;
   agentFullId: string;
   agentDisplayName: string;
@@ -64,6 +66,7 @@ type Props = {
 };
 
 export function AgentTaskWorkspace({
+  projectSlug,
   agentSlug,
   agentFullId,
   agentDisplayName,
@@ -184,7 +187,10 @@ export function AgentTaskWorkspace({
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                      <Link href="/tasks" className="hover:text-foreground">
+                      <Link
+                        href={projectHref(projectSlug, "/tasks")}
+                        className="hover:text-foreground"
+                      >
                         Tasks
                       </Link>
                       <span>/</span>
@@ -234,7 +240,12 @@ export function AgentTaskWorkspace({
             </header>
 
             <div className="min-h-0 flex-1">
-              <SelectedTaskPanel selected={selected} agentSlug={agentSlug} agentDisplayName={agentDisplayName} />
+              <SelectedTaskPanel
+                selected={selected}
+                projectSlug={projectSlug}
+                agentSlug={agentSlug}
+                agentDisplayName={agentDisplayName}
+              />
             </div>
           </>
         ) : (
@@ -250,10 +261,12 @@ export function AgentTaskWorkspace({
 
 function SelectedTaskPanel({
   selected,
+  projectSlug,
   agentSlug,
   agentDisplayName,
 }: {
   selected: SelectedTaskBundle;
+  projectSlug: string;
   agentSlug: string;
   agentDisplayName: string;
 }) {
@@ -285,6 +298,7 @@ function SelectedTaskPanel({
   return (
     <LiveTranscript
       key={selected.task.id}
+      projectSlug={projectSlug}
       agentSlug={agentSlug}
       agentDisplayName={agentDisplayName}
       threadId={selected.threadId}

@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/sidebar";
 import { RunningDot } from "@/components/running-dot";
 import type { AgentTemplateKey } from "@/server/agent-templates";
+import { projectHref } from "@/lib/project-href";
 
 type AgentNavEntry = {
   /** Stable key for React, e.g. the agent_id. */
@@ -22,6 +23,7 @@ type AgentNavEntry = {
 };
 
 type Props = {
+  projectSlug: string;
   agents: AgentNavEntry[];
   /**
    * agent_id → in-flight task count. Drives the live-dot + count badge on
@@ -37,7 +39,7 @@ const TEMPLATE_ICONS: Record<AgentTemplateKey, LucideIcon> = {
   seo: Search,
 };
 
-export function AgentNav({ agents, inFlightCounts = {} }: Props) {
+export function AgentNav({ projectSlug, agents, inFlightCounts = {} }: Props) {
   const pathname = usePathname();
 
   return (
@@ -47,8 +49,8 @@ export function AgentNav({ agents, inFlightCounts = {} }: Props) {
         // its own first-turn work (onboarding audit, user-assigned planning
         // jobs); the work it delegates to specialists shows up in those
         // specialists' tabs. Chat tab is still one click away for free-form.
-        const href = `/agents/${a.slug}/tasks`;
-        const agentBase = `/agents/${a.slug}`;
+        const href = projectHref(projectSlug, `/agents/${a.slug}/tasks`);
+        const agentBase = `/${projectSlug}/agents/${a.slug}`;
         const isActive =
           pathname === agentBase || pathname?.startsWith(`${agentBase}/`);
         const Icon = a.template_key ? TEMPLATE_ICONS[a.template_key] ?? Bot : Bot;

@@ -22,7 +22,7 @@ export async function GET(
 
   if (errorParam) {
     return htmlResponse(
-      `<h1>OAuth denied</h1><p>The provider returned: <code>${escapeHtml(errorParam)}</code></p><p><a href="/connections">Back to Connections</a></p>`,
+      `<h1>OAuth denied</h1><p>The provider returned: <code>${escapeHtml(errorParam)}</code></p><p><a href="/">Back to app</a></p>`,
       400,
     );
   }
@@ -79,7 +79,7 @@ export async function GET(
 
   if (!tokenData.refresh_token) {
     return htmlResponse(
-      `<h1>No refresh token</h1><p>Re-authorize and ensure the consent screen prompts for offline access.</p><p><a href="/connections">Back</a></p>`,
+      `<h1>No refresh token</h1><p>Re-authorize and ensure the consent screen prompts for offline access.</p><p><a href="/${encodeURIComponent(project)}/connections">Back</a></p>`,
       400,
     );
   }
@@ -101,7 +101,9 @@ export async function GET(
     );
   }
 
-  return NextResponse.redirect(`${callbackBase}/connections?connected=${provider}`);
+  return NextResponse.redirect(
+    `${callbackBase}/${encodeURIComponent(project)}/connections?connected=${provider}`,
+  );
 }
 
 type TokenConfig = {

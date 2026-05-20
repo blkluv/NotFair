@@ -32,11 +32,11 @@ export async function GET(request: Request) {
   }
 
   // The pending state may carry a `return_to` (e.g. the chat URL the user
-  // started from). Default to /connections — that's where the MCP cards
-  // live, so it's a sensible landing if no caller asked for somewhere else.
+  // started from). Default to / so the root redirect bounces them to their
+  // active project's home if no caller asked for a specific destination.
   // `return_to` is already sanitized in startMcpConnect to be a same-origin
   // path; URL() with a base will additionally reject anything malformed.
-  const back = new URL(pending.return_to ?? "/connections", request.url);
+  const back = new URL(pending.return_to ?? "/", request.url);
 
   if (upstreamError) {
     back.searchParams.set(

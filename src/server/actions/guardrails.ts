@@ -35,7 +35,6 @@ export async function updateGuardrailsAction(
     },
   });
 
-  revalidatePath("/settings");
   revalidatePath("/", "layout");
 }
 

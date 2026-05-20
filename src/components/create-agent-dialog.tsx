@@ -23,6 +23,7 @@ import {
   type AgentChoice,
 } from "@/server/actions/agents";
 import { slugify } from "@/lib/slug";
+import { projectHref } from "@/lib/project-href";
 import type { CloneAgentResult } from "@/server/openclaw/clone-agent";
 import { DisableSourceCronsDialog } from "./disable-source-crons-dialog";
 
@@ -100,7 +101,7 @@ export function CreateAgentDialog({ open, onOpenChange, projectSlug }: Props) {
         }
         toast.success(`Created ${name.trim()}`);
         onOpenChange(false);
-        router.push(`/agents/${r.data.slug}/chat`);
+        router.push(projectHref(projectSlug, `/agents/${r.data.slug}/chat`));
         router.refresh();
       });
       return;
@@ -133,7 +134,7 @@ export function CreateAgentDialog({ open, onOpenChange, projectSlug }: Props) {
         setPostClone({ result: r.data, sourceLabel: selectedSource?.display_name ?? sourceId });
       } else {
         // Send the user straight into the new agent.
-        router.push(`/agents/${r.data.new_slug}/chat`);
+        router.push(projectHref(projectSlug, `/agents/${r.data.new_slug}/chat`));
       }
       router.refresh();
     });
@@ -284,7 +285,9 @@ export function CreateAgentDialog({ open, onOpenChange, projectSlug }: Props) {
           newAgentId={postClone.result.new_agent_id}
           sourceCrons={postClone.result.source_crons}
           onDone={() => {
-            router.push(`/agents/${postClone.result.new_slug}/chat`);
+            router.push(
+              projectHref(projectSlug, `/agents/${postClone.result.new_slug}/chat`),
+            );
             router.refresh();
           }}
         />

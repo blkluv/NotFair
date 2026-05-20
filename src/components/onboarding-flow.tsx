@@ -11,6 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import { projectHref } from "@/lib/project-href";
 import { startMcpConnect } from "@/server/actions/mcp";
 import { createProjectForOnboardingAction } from "@/server/actions/projects";
 import {
@@ -123,6 +124,8 @@ function NameStep({ onCreated }: { onCreated: (slug: string) => void }) {
 function ConnectStep({ slug }: { slug: string }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const connectionsHref = projectHref(slug, "/connections");
+  const cmoTasksHref = projectHref(slug, "/agents/cmo/tasks");
 
   async function onConnect() {
     setBusy(true);
@@ -148,7 +151,7 @@ function ConnectStep({ slug }: { slug: string }) {
     // Without Google Ads connected, there's nothing for the CMO to audit
     // yet — drop the user on the CMO's task tab so they can see "no tasks
     // assigned, connect Google Ads to start".
-    router.push("/agents/cmo/tasks");
+    router.push(cmoTasksHref);
   }
 
   return (
@@ -185,7 +188,7 @@ function ConnectStep({ slug }: { slug: string }) {
           </div>
           <p className="text-xs text-muted-foreground">
             You can disconnect anytime in{" "}
-            <Link href="/connections" className="underline underline-offset-2">
+            <Link href={connectionsHref} className="underline underline-offset-2">
               Connections
             </Link>
             .
@@ -253,7 +256,10 @@ function AccountStep({ slug }: { slug: string }) {
       // task pre-selected — startTaskIfProposed kicks it off, the user
       // watches it run live in the standard task UX.
       router.replace(
-        `/agents/cmo/tasks?task=${encodeURIComponent(result.task_display_id)}`,
+        projectHref(
+          slug,
+          `/agents/cmo/tasks?task=${encodeURIComponent(result.task_display_id)}`,
+        ),
       );
     })();
   }, [state, slug, router]);
@@ -268,7 +274,10 @@ function AccountStep({ slug }: { slug: string }) {
         return;
       }
       router.replace(
-        `/agents/cmo/tasks?task=${encodeURIComponent(result.task_display_id)}`,
+        projectHref(
+          slug,
+          `/agents/cmo/tasks?task=${encodeURIComponent(result.task_display_id)}`,
+        ),
       );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
@@ -305,7 +314,7 @@ function AccountStep({ slug }: { slug: string }) {
               <Link href="/onboarding">Retry from start</Link>
             </Button>
             <Button variant="outline" asChild>
-              <Link href="/agents/cmo/chat">Skip to chat</Link>
+              <Link href={projectHref(slug, "/agents/cmo/chat")}>Skip to chat</Link>
             </Button>
           </div>
         </CardContent>
@@ -334,7 +343,7 @@ function AccountStep({ slug }: { slug: string }) {
               </Link>
             </Button>
             <Button variant="outline" asChild>
-              <Link href="/agents/cmo/chat">Skip to chat</Link>
+              <Link href={projectHref(slug, "/agents/cmo/chat")}>Skip to chat</Link>
             </Button>
           </div>
         </CardContent>

@@ -28,6 +28,7 @@ import { getActiveProject } from "@/server/active-project";
 import { pendingApprovalCount } from "@/server/db/approvals";
 import { listProjectAgents } from "@/server/agent-meta";
 import { inFlightCountsByAgent } from "@/server/db/tasks";
+import { projectHref } from "@/lib/project-href";
 import { ProjectSwitcher } from "./project-switcher";
 import { PairedOpenclawPill } from "./paired-openclaw-pill";
 import { AgentNav } from "./agent-nav";
@@ -43,7 +44,7 @@ type NavItem = {
 };
 
 const NAV: NavItem[] = [
-  { href: "/", label: "Home", icon: Home },
+  { href: "", label: "Home", icon: Home },
   { href: "/approvals", label: "Approvals", icon: CheckCircle2, badge: true },
   { href: "/tasks", label: "Tasks", icon: ListChecks },
   { href: "/crons", label: "Crons", icon: Clock },
@@ -99,6 +100,7 @@ export async function AppSidebar() {
             </SidebarGroupLabel>
             <SidebarGroupContent>
               <AgentNav
+                projectSlug={active.slug}
                 agents={agentEntries.map((a) => ({
                   key: a.agent_id,
                   slug: a.slug,
@@ -112,28 +114,30 @@ export async function AppSidebar() {
           </SidebarGroup>
         )}
 
-        <SidebarGroup>
-          <SidebarGroupLabel>Project</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {NAV.map((item) => (
-                <SidebarMenuItem key={item.href}>
-                  <SidebarMenuButton asChild>
-                    <Link href={item.href}>
-                      <item.icon />
-                      <span>{item.label}</span>
-                      {item.badge && approvalsBadge > 0 && (
-                        <Badge variant="secondary" className="ml-auto h-5 px-1.5 text-[10px]">
-                          {approvalsBadge}
-                        </Badge>
-                      )}
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {active && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Project</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {NAV.map((item) => (
+                  <SidebarMenuItem key={item.href || "home"}>
+                    <SidebarMenuButton asChild>
+                      <Link href={projectHref(active.slug, item.href)}>
+                        <item.icon />
+                        <span>{item.label}</span>
+                        {item.badge && approvalsBadge > 0 && (
+                          <Badge variant="secondary" className="ml-auto h-5 px-1.5 text-[10px]">
+                            {approvalsBadge}
+                          </Badge>
+                        )}
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
       </SidebarContent>
 
       <SidebarFooter>

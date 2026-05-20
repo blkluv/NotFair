@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { slugify } from "@/lib/slug";
+import { projectHref } from "@/lib/project-href";
 import { renameAgentAction } from "@/server/actions/agents";
 
 type Props = {
@@ -52,12 +53,12 @@ export function AgentRenameCard({
       const d = r.data;
       toast.success(
         d.full_rename
-          ? `Renamed to "${d.display_name}" (new URL: /agents/${d.slug})`
+          ? `Renamed to "${d.display_name}" (new URL: ${projectHref(projectSlug, `/agents/${d.slug}`)})`
           : `Renamed to "${d.display_name}"`,
       );
       if (d.full_rename) {
-        // agent_id and URL slug changed — route to the new chat page.
-        router.push(`/agents/${d.slug}/settings`);
+        // agent_id and URL slug changed — route to the new settings page.
+        router.push(projectHref(projectSlug, `/agents/${d.slug}/settings`));
         router.refresh();
       } else {
         router.refresh();

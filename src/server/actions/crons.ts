@@ -59,7 +59,7 @@ export async function scheduleCronAction(input: ScheduleCronInput): Promise<Sche
       summary: `Scheduled '${nameSlug.slug}' (${input.schedule_kind} ${scheduleValueTrimmed})`,
       payload: { cron_id: result.id, cron_name: result.name, brief: briefTrimmed },
     });
-    revalidatePath("/crons");
+    revalidatePath("/", "layout");
     revalidatePath("/", "layout");
     return { ok: true, cron_id: result.id, cron_name: result.name };
   } catch (err) {
@@ -70,7 +70,7 @@ export async function scheduleCronAction(input: ScheduleCronInput): Promise<Sche
 export async function pauseCronAction(id: string): Promise<{ ok: boolean; error?: string }> {
   try {
     await disableCron(id);
-    revalidatePath("/crons");
+    revalidatePath("/", "layout");
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -80,7 +80,7 @@ export async function pauseCronAction(id: string): Promise<{ ok: boolean; error?
 export async function resumeCronAction(id: string): Promise<{ ok: boolean; error?: string }> {
   try {
     await enableCron(id);
-    revalidatePath("/crons");
+    revalidatePath("/", "layout");
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -90,7 +90,7 @@ export async function resumeCronAction(id: string): Promise<{ ok: boolean; error
 export async function deleteCronAction(id: string): Promise<{ ok: boolean; error?: string }> {
   try {
     await removeCron(id);
-    revalidatePath("/crons");
+    revalidatePath("/", "layout");
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };

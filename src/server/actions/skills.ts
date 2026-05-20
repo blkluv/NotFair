@@ -19,6 +19,9 @@ export async function setSkillEnabledAction(
   // Skills config is workspace-wide, so any agent's skills tab needs to refresh.
   // Cheapest correct invalidation: revalidate the caller's page; user can refresh
   // other tabs themselves on the rare cross-agent reconfig.
-  revalidatePath(`/agents/${agentSlug}/skills`);
+  // Path is project-scoped now; invalidating the layout tree is the safest
+  // cheap option since we don't have the project slug at this call site.
+  void agentSlug;
+  revalidatePath("/", "layout");
   return { ok: true };
 }

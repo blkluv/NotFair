@@ -7,9 +7,11 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { startMcpConnect } from "@/server/actions/mcp";
 import type { McpRuntimeStatus } from "@/server/mcp-state";
+import { projectHref } from "@/lib/project-href";
 
 type Props = {
   status: McpRuntimeStatus;
+  projectSlug: string;
 };
 
 /**
@@ -18,7 +20,7 @@ type Props = {
  * the Connections page, but threads the current chat URL through as
  * `return_to` so the user lands back here on success.
  */
-export function GoogleAdsMcpBanner({ status }: Props) {
+export function GoogleAdsMcpBanner({ status, projectSlug }: Props) {
   const [busy, setBusy] = useState(false);
 
   if (status.state === "connected") return null;
@@ -71,7 +73,7 @@ export function GoogleAdsMcpBanner({ status }: Props) {
           <p className="mt-0.5 text-xs text-amber-900/80 dark:text-amber-100/80">
             {detail}{" "}
             <Link
-              href="/connections"
+              href={projectHref(projectSlug, "/connections")}
               className="underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-50"
             >
               Manage connections

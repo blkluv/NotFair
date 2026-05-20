@@ -1,7 +1,7 @@
 "use client";
 
 import { useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { ChevronsUpDown, Plus, Check } from "lucide-react";
 import {
   DropdownMenu,
@@ -14,6 +14,7 @@ import {
 import { SidebarMenuButton } from "@/components/ui/sidebar";
 import type { Project } from "@/types";
 import { switchProjectAction } from "@/server/actions/projects";
+import { projectHref, subPathFromPathname } from "@/lib/project-href";
 import { toast } from "sonner";
 
 type Props = {
@@ -23,18 +24,20 @@ type Props = {
 
 export function ProjectSwitcher({ projects, activeSlug }: Props) {
   const router = useRouter();
+  const pathname = usePathname();
   const [pending, start] = useTransition();
   const active = projects.find((p) => p.slug === activeSlug) ?? null;
 
   function pick(slug: string) {
     if (slug === activeSlug) return;
+    const subPath = subPathFromPathname(pathname, activeSlug);
     start(async () => {
       const result = await switchProjectAction(slug);
       if (!result.ok) {
         toast.error(result.error);
         return;
       }
-      router.refresh();
+      router.push(projectHref(slug, subPath));
     });
   }
 

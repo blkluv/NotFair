@@ -102,7 +102,7 @@ export async function disconnectMcpAction(input: {
   } catch (err) {
     return { ok: false, error: humanError(err) };
   }
-  revalidatePath("/connections");
+  revalidatePath("/", "layout");
   return { ok: true };
 }
 
