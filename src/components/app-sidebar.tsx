@@ -32,6 +32,7 @@ import { ProjectSwitcher } from "./project-switcher";
 import { PairedOpenclawPill } from "./paired-openclaw-pill";
 import { AgentNav } from "./agent-nav";
 import { CreateAgentButton } from "./create-agent-button";
+import { GlobalLivenessPoller } from "./global-liveness-poller";
 import { Badge } from "@/components/ui/badge";
 
 type NavItem = {
@@ -62,9 +63,15 @@ export async function AppSidebar() {
       inFlightCounts[agentId] = count;
     }
   }
+  const anyInFlight = Object.values(inFlightCounts).some((n) => n > 0);
 
   return (
     <Sidebar collapsible="icon">
+      {/* Refresh the whole layout (this sidebar + the current route's
+          server components) every 5s while anything is in flight, so
+          badges + task groupings stay current no matter what page the
+          user is on. Self-disables when nothing is live. */}
+      <GlobalLivenessPoller hasInFlight={anyInFlight} />
       <SidebarHeader>
         {/* Project switcher + collapse toggle. Toggle stays visible in
             icon-collapsed mode so the user can always re-expand the rail. */}
