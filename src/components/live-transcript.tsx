@@ -150,6 +150,20 @@ export function LiveTranscript({
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickyBottomRef = useRef(true);
   const abortRef = useRef<AbortController | null>(null);
+  /**
+   * Ids of every transcript event we've already committed to state. Acts as
+   * a dedupe set for poll-result merging: two `pollOnce` calls can fire
+   * with the same `byteOffset` closure before React commits the next
+   * offset (e.g. the post-stream catch-up poll racing the background
+   * polling effect), so both fetches would return the same JSONL slice and
+   * we'd end up with duplicate React keys. Lives in a ref so the dedupe
+   * is synchronous — `setEvents(prev => …)` updater functions don't run
+   * until React's next commit, so they can't be used to derive the count
+   * we return from `pollOnce`.
+   */
+  const seenEventIdsRef = useRef<Set<string>>(
+    new Set(initialEvents.map((e) => e.id)),
+  );
 
   // ── Auto-scroll: only when the user is already near the bottom. ─────
   function onScroll() {
@@ -179,8 +193,15 @@ export function LiveTranscript({
         byteOffset: number;
         file_size: number;
       };
-      if (data.events.length > 0) {
-        setEvents((prev) => [...prev, ...data.events]);
+      // Dedupe against `seenEventIdsRef` synchronously. The ref tracks
+      // every id we've committed to state across the entire polling and
+      // SSE lifetimes; rationale lives on the ref's declaration.
+      const fresh = data.events.filter(
+        (e) => !seenEventIdsRef.current.has(e.id),
+      );
+      for (const e of fresh) seenEventIdsRef.current.add(e.id);
+      if (fresh.length > 0) {
+        setEvents((prev) => [...prev, ...fresh]);
         // Clear pending state: JSONL now has the canonical events so the
         // optimistic placeholders are no longer needed.
         setPendingUserMsg(null);
@@ -190,11 +211,11 @@ export function LiveTranscript({
       }
       if (data.byteOffset !== byteOffset) setByteOffset(data.byteOffset);
       const shouldStop = onPolled?.({
-        newEvents: data.events.length,
+        newEvents: fresh.length,
         fileSize: data.file_size,
       });
       if (shouldStop) setStopPolling(true);
-      return { newEvents: data.events.length };
+      return { newEvents: fresh.length };
     } catch {
       return { newEvents: 0 };
     }
