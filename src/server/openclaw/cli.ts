@@ -47,12 +47,50 @@ export async function openclaw(
   args: string[],
   options: OpenClawOptions = {},
 ): Promise<unknown> {
-  const run = () => runOpenclaw(args, options);
+  const run = () => runOpenclawWithRetry(args, options);
   const next = openclawQueue.then(run, run);
   // Keep the chain alive even when a call rejects — without `.catch`
   // a single failure would propagate forever to subsequent callers.
   openclawQueue = next.catch(() => undefined);
   return next;
+}
+
+/**
+ * The OpenClaw CLI does optimistic concurrency on ~/.openclaw/openclaw.json:
+ * it loads at startup, and on write checks whether the file changed
+ * underneath it. When the gateway daemon (a separate process) writes
+ * between our load and our write, we get exit code 1 with stderr:
+ *
+ *   [openclaw] Could not start the CLI.
+ *   [openclaw] Reason: config changed since last load
+ *
+ * This is a transient cross-process race that our in-process mutex
+ * can't prevent. Retry a couple of times — each attempt re-reads the
+ * config, so a winning retry is essentially "no overlap this time".
+ */
+async function runOpenclawWithRetry(
+  args: string[],
+  options: OpenClawOptions,
+): Promise<unknown> {
+  const maxAttempts = 3;
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await runOpenclaw(args, options);
+    } catch (err) {
+      lastErr = err;
+      if (!(err instanceof OpenClawError)) throw err;
+      const transient =
+        err.exitCode === 1 &&
+        /config changed since last load|EAGAIN|EBUSY/i.test(err.stderr);
+      if (!transient || attempt === maxAttempts) throw err;
+      // Small backoff with jitter so two competing callers don't lock-
+      // step into the same retry slot forever.
+      const delayMs = 150 * attempt + Math.floor(Math.random() * 100);
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  throw lastErr;
 }
 
 function runOpenclaw(args: string[], options: OpenClawOptions): Promise<unknown> {

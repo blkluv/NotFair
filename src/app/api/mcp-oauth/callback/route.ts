@@ -98,10 +98,15 @@ export async function GET(request: Request) {
   try {
     await setMcpBearer(pending.stored_key, pending.resource_url, access_token);
   } catch (err) {
-    back.searchParams.set(
-      "mcp_error",
-      `Saving MCP config failed: ${err instanceof Error ? err.message : String(err)}`,
-    );
+    const raw = err instanceof Error ? err.message : String(err);
+    // Scrub bearers + any oat_ token shape before exposing in the URL —
+    // the redirect lands in browser history, server logs, and Referer
+    // headers on the destination page. Leaking the access token there
+    // would let any local-machine reader replay calls against the MCP.
+    const scrubbed = raw
+      .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer [redacted]")
+      .replace(/oat_[A-Za-z0-9_]+/gi, "oat_[redacted]");
+    back.searchParams.set("mcp_error", `Saving MCP config failed: ${scrubbed}`);
     return NextResponse.redirect(back);
   }
 
