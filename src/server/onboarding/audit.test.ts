@@ -339,6 +339,74 @@ describe("runAudit", () => {
     });
   });
 
+  describe("ACCOUNT_SNAPSHOT (small-account audit always finds something)", () => {
+    it("emits a snapshot finding for low-activity accounts (NotFair-shape regression)", async () => {
+      // Real NotFair-account shape observed 2026-05-20: 1 enabled campaign,
+      // $39.39 / 42 imp / 0 conv in 30d. None of the actionable queries
+      // returned rows under the strict filters, but the user still saw
+      // "0 findings" which felt broken. ACCOUNT_SNAPSHOT must surface
+      // proof-of-work whenever campaigns_summary has rows.
+      const notfairShape = {
+        wasted_spend: { rowCount: 0, rows: [] },
+        low_qs: { rowCount: 0, rows: [] },
+        search_term_gap: { rowCount: 0, rows: [] },
+        budget_pacing: { rowCount: 0, rows: [] },
+        campaigns_summary: {
+          rowCount: 1,
+          rows: [
+            {
+              campaign: {
+                name: "NotFair - Google Ads + Claude",
+                status: 2,
+                status_name: "ENABLED",
+              },
+              metrics: { cost_micros: 39_390_000, impressions: 42, conversions: 0 },
+            },
+          ],
+        },
+      };
+      mcpRpcMock.mockResolvedValueOnce(mockToolCallResult(notfairShape));
+      const events = await collect("acme");
+      const snapshot = events.find(
+        (e) => e.type === "audit:finding" && e.finding.category === "ACCOUNT_SNAPSHOT",
+      );
+      expect(snapshot, "snapshot finding must be emitted even when other queries return 0 rows").toBeDefined();
+      if (snapshot && snapshot.type === "audit:finding") {
+        expect(snapshot.finding.headline).toContain("NotFair");
+        expect(snapshot.finding.headline).toContain("$39.39");
+        // 0 conversions on real spend → suggested action calls out tracking.
+        expect(snapshot.finding.suggested_action).toMatch(/conversion tracking|low impressions|scale/i);
+      }
+      const complete = events.find((e) => e.type === "audit:complete");
+      if (complete && complete.type === "audit:complete") {
+        expect(complete.summary.account_state).toBe("normal");
+        // ACCOUNT_SNAPSHOT must NOT be promoted to Top Fix.
+        expect(complete.summary.top_fix_id).toBeNull();
+        // Snapshot finding counts toward the total.
+        expect(complete.summary.count).toBeGreaterThanOrEqual(1);
+      }
+    });
+
+    it("snapshot is NEVER promoted to Top Fix when actionable findings exist", async () => {
+      mcpRpcMock.mockResolvedValueOnce(mockToolCallResult(NORMAL_REPORTS));
+      const events = await collect("acme");
+      const complete = events.find((e) => e.type === "audit:complete");
+      if (complete && complete.type === "audit:complete") {
+        expect(complete.summary.top_fix_id).toMatch(/^wasted_spend:/);
+      }
+    });
+
+    it("does NOT emit a snapshot when campaigns_summary is empty (D5 path)", async () => {
+      mcpRpcMock.mockResolvedValueOnce(mockToolCallResult(EMPTY_REPORTS));
+      const events = await collect("acme");
+      const snapshot = events.find(
+        (e) => e.type === "audit:finding" && e.finding.category === "ACCOUNT_SNAPSHOT",
+      );
+      expect(snapshot).toBeUndefined();
+      expect(events.some((e) => e.type === "audit:empty")).toBe(true);
+    });
+  });
+
   describe("accountId plumbing (multi-account bearers, Demo2 fix)", () => {
     beforeEach(() => {
       mcpRpcMock.mockResolvedValue(mockToolCallResult(NORMAL_REPORTS));

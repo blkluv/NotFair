@@ -6,8 +6,10 @@ import Link from "next/link";
 import {
   AlertCircle,
   AlertTriangle,
+  BarChart3,
   ChevronRight,
   Gauge,
+  ListChecks,
   Loader2,
   Plug,
   Search,
@@ -745,6 +747,8 @@ const CATEGORY_ICON: Record<FindingCategory, React.ComponentType<{ className?: s
   LOW_QS: Gauge,
   SEARCH_TERM_GAP: Search,
   BUDGET_PACING: TrendingUp,
+  ACCOUNT_SNAPSHOT: BarChart3,
+  NEXT_STEPS: ListChecks,
 };
 
 function FindingCard({
@@ -774,6 +778,11 @@ function FindingCard({
           <p className="text-xs text-muted-foreground tabular-nums">
             {finding.evidence}
           </p>
+          {finding.suggested_action && (
+            <p className="text-xs leading-snug text-muted-foreground">
+              {finding.suggested_action}
+            </p>
+          )}
           {isTopFix ? (
             <Button asChild size="lg" className="mt-2">
               <Link
@@ -787,7 +796,8 @@ function FindingCard({
               <Link
                 href={`/agents/cmo/chat?propose=${encodeURIComponent(finding.id)}`}
               >
-                I&rsquo;ll fix this <ChevronRight className="ml-0.5 size-3.5" aria-hidden />
+                {actionLabelFor(finding)}{" "}
+                <ChevronRight className="ml-0.5 size-3.5" aria-hidden />
               </Link>
             </Button>
           )}
@@ -795,6 +805,13 @@ function FindingCard({
       </Card>
     </li>
   );
+}
+
+/** Action-link copy per category — "I'll fix this" only fits actionable findings. */
+function actionLabelFor(finding: Finding): string {
+  if (finding.category === "ACCOUNT_SNAPSHOT") return "Talk it through with CMO";
+  if (finding.category === "NEXT_STEPS") return "Set this up with CMO";
+  return "I’ll fix this";
 }
 
 function CompleteFooterCtas({

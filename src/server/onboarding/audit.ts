@@ -34,15 +34,52 @@ export type FindingCategory =
   | "WASTED_SPEND"
   | "LOW_QS"
   | "SEARCH_TERM_GAP"
-  | "BUDGET_PACING";
+  | "BUDGET_PACING"
+  | "ACCOUNT_SNAPSHOT"
+  | "NEXT_STEPS";
 
-/** Category-display order; also the tie-break order for Top Fix selection. */
+/**
+ * Category-display order and Top Fix tie-break order.
+ *
+ * ACCOUNT_SNAPSHOT is informational — it always fires when the account has
+ * any spend and gives the user proof-of-work ("the audit looked at real
+ * data"). NEXT_STEPS is the agency-playbook category: for any non-empty
+ * account, it surfaces 1-3 archetype-tailored recommendations with explicit
+ * cron cadences (daily/weekly/monthly) the CMO can then propose in chat via
+ * the existing propose_cron pattern (D8).
+ *
+ * Listed LAST so actionable categories render above them in the UI.
+ */
 const CATEGORY_PRIORITY: FindingCategory[] = [
   "WASTED_SPEND",
   "LOW_QS",
   "SEARCH_TERM_GAP",
   "BUDGET_PACING",
+  "ACCOUNT_SNAPSHOT",
+  "NEXT_STEPS",
 ];
+
+/** Categories eligible to be promoted to "Top Fix" (must be actionable). */
+const TOP_FIX_ELIGIBLE: ReadonlySet<FindingCategory> = new Set([
+  "WASTED_SPEND",
+  "LOW_QS",
+  "SEARCH_TERM_GAP",
+  "BUDGET_PACING",
+]);
+
+/**
+ * Map each FindingCategory to the GAQL query name in AUDIT_SCRIPT that it
+ * transforms. Most are 1:1 (lowercased category = query name). The
+ * snapshot + playbook categories both aggregate over campaigns_summary.
+ */
+const SOURCE_REPORT_FOR: Record<FindingCategory, string> = {
+  WASTED_SPEND: "wasted_spend",
+  LOW_QS: "low_qs",
+  SEARCH_TERM_GAP: "search_term_gap",
+  BUDGET_PACING: "budget_pacing",
+  ACCOUNT_SNAPSHOT: "campaigns_summary",
+  NEXT_STEPS: "campaigns_summary",
+};
 
 export type Finding = {
   id: string;
@@ -270,9 +307,13 @@ export async function* runAudit(
   const categoryErrors: Array<{ category: string; message: string }> = [];
 
   for (const category of CATEGORY_PRIORITY) {
-    const report = reports[category.toLowerCase()];
+    const reportKey = SOURCE_REPORT_FOR[category];
+    const report = reports[reportKey];
     if (!report) continue;
     if ("error" in report && report.error) {
+      // ACCOUNT_SNAPSHOT sourcing from campaigns_summary inherits its error;
+      // surface it under the snapshot category so the user sees the failure
+      // in context.
       yield {
         type: "audit:finding-error",
         category,
@@ -448,10 +489,15 @@ function isEnabledCampaign(row: GaqlRow): boolean {
   return false;
 }
 
-/** Top Fix = highest dollar_impact_usd; tie-break by CATEGORY_PRIORITY order. */
+/**
+ * Top Fix = highest dollar_impact_usd among actionable findings (snapshot
+ * categories are skipped). Tie-break by CATEGORY_PRIORITY order. Returns
+ * null when only informational findings exist.
+ */
 function pickTopFix(findings: Finding[]): Finding | null {
-  if (findings.length === 0) return null;
-  return findings.slice().sort((a, b) => {
+  const actionable = findings.filter((f) => TOP_FIX_ELIGIBLE.has(f.category));
+  if (actionable.length === 0) return null;
+  return actionable.slice().sort((a, b) => {
     if (a.dollar_impact_usd !== b.dollar_impact_usd) {
       return b.dollar_impact_usd - a.dollar_impact_usd;
     }
@@ -462,7 +508,233 @@ function pickTopFix(findings: Finding[]): Finding | null {
   })[0]!;
 }
 
+/**
+ * Account archetypes for the NEXT_STEPS playbook. Pure rule-based classifier
+ * — what a real agency would say after 30 seconds of looking at this account.
+ *
+ *   empty       — 0 enabled campaigns or campaigns_summary empty
+ *   no_tracking — has impressions + spend but 0 conversions in 30d
+ *                 (most common new-advertiser failure mode)
+ *   low_volume  — has conversions but < 1000 impressions/mo
+ *                 (not enough signal to optimize yet)
+ *   active      — sustained activity, conversions, real volume
+ */
+type AccountArchetype = "empty" | "no_tracking" | "low_volume" | "active";
+
+function classifyArchetype(rows: GaqlRow[]): AccountArchetype {
+  const enabled = rows.filter(isEnabledCampaign);
+  if (enabled.length === 0) return "empty";
+  const totalConversions = rows.reduce(
+    (acc, r) => acc + (getMetric(r, "metrics.conversions") ?? 0),
+    0,
+  );
+  const totalImpressions = rows.reduce(
+    (acc, r) => acc + (getMetric(r, "metrics.impressions") ?? 0),
+    0,
+  );
+  if (totalConversions === 0 && totalImpressions > 0) return "no_tracking";
+  if (totalImpressions < 1000) return "low_volume";
+  return "active";
+}
+
+/**
+ * Agency-style playbook per archetype. Each entry is a single Finding the
+ * UI renders as a card and the CMO chat picks up from FIRST_TURN.md. The
+ * `suggested_action` includes the explicit cron cadence — daily/weekly/
+ * monthly — so the CMO can propose it via the propose_cron pattern (D8).
+ *
+ * Source: distilled from common agency onboarding playbooks (e.g., Google
+ * Ads Editor onboarding flows, Optmyzr account audits, Wordstream
+ * "First 90 days" checklist). Conservative defaults — won't suggest
+ * anything an agency wouldn't.
+ */
+const NEXT_STEPS_PLAYBOOK: Record<AccountArchetype, Finding[]> = {
+  empty: [
+    // Empty accounts use the D26 roadmap card in the UI; NEXT_STEPS adds
+    // ongoing-ops context for when the user does start campaigns.
+    {
+      id: "next:setup_conv_tracking",
+      category: "NEXT_STEPS",
+      headline: "Install conversion tracking before your first $10 of spend.",
+      evidence:
+        "No campaigns running yet — installing tracking now means your first dollar generates optimization signal.",
+      suggested_action:
+        "Add the Google Ads conversion tag (or GA4 events) on your site. Once installed, I can run a daily 'is tracking firing?' health check at 9am.",
+      dollar_impact_usd: 0,
+    },
+  ],
+  no_tracking: [
+    {
+      id: "next:install_conv_tracking",
+      category: "NEXT_STEPS",
+      headline: "Install conversion tracking — 0 conversions on real spend.",
+      evidence:
+        "Your account is running ads and getting impressions, but no conversions are recorded. Without tracking, optimization is blind.",
+      suggested_action:
+        "Add the Google Ads conversion tag (or import GA4 events). I can schedule a daily 9am check that alerts you if conv tracking goes silent again.",
+      dollar_impact_usd: 0,
+    },
+    {
+      id: "next:weekly_search_term_review",
+      category: "NEXT_STEPS",
+      headline: "Set up a weekly search-term review.",
+      evidence:
+        "New accounts collect broad-match noise fast — by week 2 you usually have 5-15 negative-keyword candidates.",
+      suggested_action:
+        "Schedule a Monday 9am cron: pull last week's search terms with cost > $0 and 0 conversions; surface as a one-click negative-keyword list.",
+      dollar_impact_usd: 0,
+    },
+    {
+      id: "next:daily_anomaly",
+      category: "NEXT_STEPS",
+      headline: "Daily spend anomaly check.",
+      evidence:
+        "Small accounts can hit budget mid-morning if a competitor bids up an auction. Catching it day-of beats finding out Monday.",
+      suggested_action:
+        "Schedule a daily 9am cron: alert if yesterday's spend > 2× trailing-7-day average, or if a campaign hit its daily cap before noon.",
+      dollar_impact_usd: 0,
+    },
+  ],
+  low_volume: [
+    {
+      id: "next:raise_bids_or_budget",
+      category: "NEXT_STEPS",
+      headline:
+        "Bid or budget may be too low — under 1,000 impressions/month is not enough to optimize.",
+      evidence:
+        "Optimization algorithms need ~30 conversions/month to learn. Increase bids on the top 3 keywords or raise the daily budget for 1-2 weeks to gather signal.",
+      suggested_action:
+        "Want me to pull bid simulator data for your top 3 keywords + recommend an adjustment? Then a weekly Friday 9am pacing check.",
+      dollar_impact_usd: 0,
+    },
+    {
+      id: "next:weekly_search_term_review",
+      category: "NEXT_STEPS",
+      headline: "Set up a weekly search-term review.",
+      evidence:
+        "Even low-volume accounts benefit from cleaning broad-match noise early — sets the foundation for when you scale.",
+      suggested_action:
+        "Schedule a Monday 9am cron: pull last week's search terms with cost > $0 and 0 conversions.",
+      dollar_impact_usd: 0,
+    },
+    {
+      id: "next:daily_anomaly",
+      category: "NEXT_STEPS",
+      headline: "Daily spend anomaly check.",
+      evidence:
+        "Even quiet accounts get budget spikes from auction-time changes.",
+      suggested_action:
+        "Schedule a daily 9am cron: alert if yesterday's spend > 2× the trailing 7-day average.",
+      dollar_impact_usd: 0,
+    },
+  ],
+  active: [
+    {
+      id: "next:daily_wasted_spend",
+      category: "NEXT_STEPS",
+      headline: "Daily wasted-spend monitor.",
+      evidence:
+        "Active accounts accumulate $5-50/day of wasted spend on keywords that stop converting. Daily catch beats weekly cleanup.",
+      suggested_action:
+        "Schedule a daily 9am cron: surface keywords with > $5 yesterday spend and 0 conversions in the last 7 days for one-click pause.",
+      dollar_impact_usd: 0,
+    },
+    {
+      id: "next:weekly_bid_optimization",
+      category: "NEXT_STEPS",
+      headline: "Weekly bid-optimization pass.",
+      evidence:
+        "Small adjustments compound — agencies typically see 8-15% CPA improvement from disciplined weekly bid management.",
+      suggested_action:
+        "Schedule a Monday 9am cron: review top 20 keywords by spend; suggest bid adjustments based on last 14 days of conversion data.",
+      dollar_impact_usd: 0,
+    },
+    {
+      id: "next:monthly_structure_review",
+      category: "NEXT_STEPS",
+      headline: "Monthly campaign-structure review.",
+      evidence:
+        "Account drift is real — after 90 days, most accounts benefit from re-segmenting ad groups by search intent.",
+      suggested_action:
+        "Schedule a first-Monday-of-the-month cron: review ad group structure + propose 1-2 refactor opportunities.",
+      dollar_impact_usd: 0,
+    },
+  ],
+};
+
 const TRANSFORMERS: Record<FindingCategory, (rows: GaqlRow[]) => Finding[]> = {
+  NEXT_STEPS: (rows) => {
+    // Always fire — even empty accounts get the "install tracking first"
+    // recommendation. The classifier maps account state to a 1-3 finding
+    // playbook; the UI renders them as cards under the NEXT_STEPS label.
+    const archetype = classifyArchetype(rows);
+    return NEXT_STEPS_PLAYBOOK[archetype];
+  },
+  ACCOUNT_SNAPSHOT: (rows) => {
+    if (rows.length === 0) return [];
+    // Aggregate across all rows the campaigns_summary returned.
+    const totalSpend = rows.reduce(
+      (acc, r) => acc + microsAsDollars(getMetric(r, "metrics.cost_micros")),
+      0,
+    );
+    const totalImpressions = rows.reduce(
+      (acc, r) => acc + (getMetric(r, "metrics.impressions") ?? 0),
+      0,
+    );
+    const totalConversions = rows.reduce(
+      (acc, r) => acc + (getMetric(r, "metrics.conversions") ?? 0),
+      0,
+    );
+    const enabled = rows.filter(isEnabledCampaign);
+    const enabledCount = enabled.length;
+    const totalCount = rows.length;
+    const topCampaign = rows
+      .slice()
+      .sort(
+        (a, b) =>
+          (getMetric(b, "metrics.cost_micros") ?? 0) -
+          (getMetric(a, "metrics.cost_micros") ?? 0),
+      )[0];
+    const topName = topCampaign
+      ? (getString(topCampaign, "campaign.name") ?? "your top campaign")
+      : "your top campaign";
+
+    const headline =
+      enabledCount === 1
+        ? `${topName}: $${totalSpend.toFixed(2)} spent in the last 30 days`
+        : `${enabledCount} active campaign${enabledCount === 1 ? "" : "s"} spent $${totalSpend.toFixed(2)} in the last 30 days`;
+
+    const evidenceParts = [
+      `${totalImpressions.toLocaleString()} impressions`,
+      `${totalConversions.toFixed(0)} conversion${totalConversions === 1 ? "" : "s"}`,
+      `${enabledCount}/${totalCount} campaign${totalCount === 1 ? "" : "s"} enabled`,
+    ];
+
+    // Suggested action varies by what we see — never just "looks fine."
+    let suggested: string;
+    if (totalConversions === 0 && totalImpressions > 0) {
+      suggested =
+        "0 conversions in 30 days — install conversion tracking or revisit your offer/landing page.";
+    } else if (totalImpressions < 100) {
+      suggested =
+        "Very low impressions — your bids or budget may be capping reach. Want me to check?";
+    } else if (totalConversions > 0 && totalSpend / totalConversions > 100) {
+      suggested = `High CPA at $${(totalSpend / totalConversions).toFixed(2)} per conversion — let me look at where the spend is going.`;
+    } else {
+      suggested = "Want me to look for ways to scale this campaign?";
+    }
+
+    return [
+      {
+        id: "account_snapshot",
+        category: "ACCOUNT_SNAPSHOT",
+        headline,
+        evidence: evidenceParts.join(" · "),
+        suggested_action: suggested,
+        dollar_impact_usd: 0,
+      },
+    ];
+  },
   WASTED_SPEND: (rows) => {
     if (rows.length === 0) return [];
     // Group by campaign — one finding per campaign with multiple wasted kws.
@@ -628,6 +900,12 @@ function renderFirstTurn(
   accountState: AccountState,
 ): string {
   const ts = new Date().toISOString();
+  const snapshot = findings.find((f) => f.category === "ACCOUNT_SNAPSHOT");
+  const nextSteps = findings.filter((f) => f.category === "NEXT_STEPS");
+  const actionable = findings.filter(
+    (f) => f.category !== "ACCOUNT_SNAPSHOT" && f.category !== "NEXT_STEPS",
+  );
+
   const lines: string[] = [
     "# First-turn context for the CMO",
     "",
@@ -644,6 +922,15 @@ function renderFirstTurn(
     "",
   ];
 
+  if (snapshot) {
+    lines.push(
+      "## Account snapshot",
+      `- ${snapshot.headline}`,
+      `- ${snapshot.evidence}`,
+      "",
+    );
+  }
+
   if (accountState === "empty") {
     lines.push(
       "## Top suggestion (new account — empty audit)",
@@ -653,15 +940,11 @@ function renderFirstTurn(
       `- Decide your first goal: leads vs traffic vs brand. I can help you pick.`,
       `- Talk it through with me — 30 minutes and you'll have a campaign brief.`,
       "",
-      "## Suggested opener",
-      "Greet the user by acknowledging they're just getting started with Google Ads.",
-      "Reference the budget recommendation by name. End with an open question that",
-      "invites them to talk through their first campaign. Keep it under 3 sentences.",
     );
   } else if (topFix) {
-    const others = findings.filter((f) => f.id !== topFix.id);
+    const others = actionable.filter((f) => f.id !== topFix.id);
     lines.push(
-      "## Top finding",
+      "## Top finding (actionable)",
       `- Category: ${topFix.category}`,
       `- Headline: ${topFix.headline}`,
       `- Evidence: ${topFix.evidence}`,
@@ -669,25 +952,57 @@ function renderFirstTurn(
       "",
     );
     if (others.length > 0) {
-      lines.push("## Other findings");
+      lines.push("## Other actionable findings");
       for (const f of others) {
         lines.push(`- ${f.category} — ${f.headline}`);
       }
       lines.push("");
     }
+  }
+
+  if (nextSteps.length > 0) {
     lines.push(
-      "## Suggested opener",
+      "## Recommended ongoing work (think like an agency)",
+      "These are the daily / weekly / monthly tasks a Google Ads agency would",
+      "schedule for an account in this state. Propose them in chat via the",
+      "<propose_cron> pattern after the user accepts the first one-time action —",
+      "each suggested_action below names the cadence to schedule.",
+      "",
+    );
+    for (const f of nextSteps) {
+      lines.push(
+        `- **${f.headline}**`,
+        `  Why: ${f.evidence}`,
+        `  Do: ${f.suggested_action}`,
+        "",
+      );
+    }
+  }
+
+  // Suggested opener — varies by what we have.
+  lines.push("## Suggested opener");
+  if (accountState === "empty") {
+    lines.push(
+      "Greet the user by acknowledging they're just getting started with Google Ads.",
+      "Reference the budget recommendation by name. End with an open question that",
+      "invites them to talk through their first campaign. Keep it under 3 sentences.",
+    );
+  } else if (topFix) {
+    lines.push(
       "Greet the user by referencing the top finding by name with the dollar figure.",
       "Make it personal and specific. End with an open question that invites them to",
       "either fix the top finding now or talk through the broader audit. Keep it under",
       "3 sentences.",
     );
+  } else if (snapshot) {
+    lines.push(
+      "Greet the user by referencing the account snapshot by name (campaign + spend).",
+      "If 0 conversions, mention installing conversion tracking as the first ongoing",
+      "task. Otherwise mention the most relevant ongoing-work item from above. End",
+      "with an open question. Keep it under 3 sentences.",
+    );
   } else {
     lines.push(
-      "## Top finding",
-      "(none — audit completed but no actionable findings classified)",
-      "",
-      "## Suggested opener",
       "Acknowledge that the audit ran cleanly and the account looks healthy from a",
       "30-day spend perspective. Ask the user what they'd like to optimize next.",
     );
