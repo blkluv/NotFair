@@ -111,6 +111,29 @@ export function listTasksByAgent(agent_id: string, status?: TaskStatus): Task[] 
     .all(agent_id) as Task[];
 }
 
+/**
+ * Map of `agent_id → in-flight task count` for a single project. Drives the
+ * sidebar's per-agent live-task badge. "In flight" means proposed (kickoff
+ * pending), approved, or running. Terminal states (succeeded/failed/cancelled)
+ * never count.
+ */
+export function inFlightCountsByAgent(
+  project_slug: string,
+): Map<string, number> {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT agent_id, COUNT(*) as count
+       FROM tasks
+       WHERE project_slug = ? AND status IN ('proposed', 'approved', 'running')
+       GROUP BY agent_id`,
+    )
+    .all(project_slug) as Array<{ agent_id: string; count: number }>;
+  const map = new Map<string, number>();
+  for (const r of rows) map.set(r.agent_id, r.count);
+  return map;
+}
+
 export type UpdateTaskInput = {
   status?: TaskStatus;
   result?: unknown;

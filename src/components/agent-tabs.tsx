@@ -11,9 +11,12 @@ type Tab = {
   icon: React.ComponentType<{ className?: string }>;
 };
 
+// Tasks is the default landing surface for specialists (and the workspace
+// where the live transcript lives), so it leads. Chat is still available as
+// a free-form thread when the user wants to talk outside the task model.
 const TABS: Tab[] = [
-  { key: "chat", label: "Chat", icon: MessageSquare },
   { key: "tasks", label: "Tasks", icon: ListChecks },
+  { key: "chat", label: "Chat", icon: MessageSquare },
   { key: "files", label: "Files", icon: FileText },
   { key: "skills", label: "Skills", icon: Sparkles },
   { key: "cron", label: "Cron", icon: Clock },

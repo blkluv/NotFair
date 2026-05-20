@@ -27,6 +27,7 @@ import { listProjects } from "@/server/db/projects";
 import { getActiveProject } from "@/server/active-project";
 import { pendingApprovalCount } from "@/server/db/approvals";
 import { listProjectAgents } from "@/server/agent-meta";
+import { inFlightCountsByAgent } from "@/server/db/tasks";
 import { ProjectSwitcher } from "./project-switcher";
 import { PairedOpenclawPill } from "./paired-openclaw-pill";
 import { AgentNav } from "./agent-nav";
@@ -55,6 +56,12 @@ export async function AppSidebar() {
   const active = await getActiveProject();
   const approvalsBadge = active ? pendingApprovalCount(active.slug) : 0;
   const agentEntries = active ? await listProjectAgents(active.slug) : [];
+  const inFlightCounts: Record<string, number> = {};
+  if (active) {
+    for (const [agentId, count] of inFlightCountsByAgent(active.slug)) {
+      inFlightCounts[agentId] = count;
+    }
+  }
 
   return (
     <Sidebar collapsible="icon">
@@ -92,6 +99,7 @@ export async function AppSidebar() {
                   description: a.description,
                   template_key: a.template_key,
                 }))}
+                inFlightCounts={inFlightCounts}
               />
             </SidebarGroupContent>
           </SidebarGroup>

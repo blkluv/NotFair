@@ -9,6 +9,28 @@ import { generateTaskThreadId, processOrchestrationBlocks } from "./process-bloc
 import { buildTaskKickoffMessage } from "./task-kickoff";
 
 /**
+ * Idempotent "claim and kickoff" — flips a proposed task to running and
+ * fires the server-side kickoff. No-op when the task isn't proposed (already
+ * started, already done, etc.). Used by the agent workspace so opening a
+ * proposed task auto-starts it the same way "Start all" does for batches,
+ * without bouncing through the chat client.
+ *
+ * Returns the post-transition task (still proposed if no claim happened, or
+ * running on success). The kickoff itself runs fire-and-forget — callers
+ * shouldn't await it; the workspace's live transcript polling will reveal
+ * progress.
+ */
+export function startTaskIfProposed(task: Task): Task {
+  if (task.status !== "proposed") return task;
+  const claimed = updateTask(task.id, { status: "running" });
+  if (!claimed) return task;
+  void runTaskKickoffServerSide(claimed).catch((err) => {
+    console.error("[start-task] kickoff failed:", err);
+  });
+  return claimed;
+}
+
+/**
  * Server-side kickoff for a task. Consumes the full gateway stream (no SSE
  * pipe to a client) and applies orchestration blocks the assignee emits.
  * Used by the "Start all" button on the agent Tasks tab so the agent

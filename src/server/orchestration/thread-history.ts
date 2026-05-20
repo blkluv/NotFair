@@ -31,25 +31,3 @@ export function loadThreadHistory(
   return { sessionKey, history };
 }
 
-import type { Task } from "@/types";
-
-/**
- * Defense-in-depth guard for the per-task auto-kickoff. We only fire the
- * hidden kickoff when:
- *   1. The task is still proposed (hasn't started yet), AND
- *   2. The thread has no history (the agent hasn't sent any reply).
- *
- * The status guard is the load-bearing one — even if history loading
- * regresses (the bug that caused this helper to exist), a succeeded task
- * still never auto-re-fires. The history guard catches the rarer case of
- * a proposed task whose first kickoff already wrote a partial reply
- * before crashing.
- */
-export function shouldAutoKickoffTask(
-  task: Task,
-  history: ChatMessage[],
-): boolean {
-  if (task.status !== "proposed") return false;
-  if (history.length > 0) return false;
-  return true;
-}

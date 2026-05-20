@@ -1,40 +1,37 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { StartAllTasksButton } from "@/components/start-all-tasks-button";
+import { AgentTaskWorkspace } from "@/components/agent-task-workspace";
 import { getActiveProject } from "@/server/active-project";
 import { resolveAgentBySlug } from "@/server/agent-meta";
-import { listTasksByAgent } from "@/server/db/tasks";
-import type { Task, TaskStatus } from "@/types";
+import { getTask, listTasksByAgent, setTaskThreadIfMissing } from "@/server/db/tasks";
+import { buildPendingSessionKey, findSessionBySessionId } from "@/server/openclaw/sessions";
+import {
+  readTranscriptTail,
+  type TranscriptEvent,
+} from "@/server/openclaw/transcript-tail";
+import { generateTaskThreadId } from "@/server/orchestration/process-blocks";
+import { startTaskIfProposed } from "@/server/orchestration/run-task";
+import type { Task } from "@/types";
 
-const STATUS_GROUPS: Array<{ status: TaskStatus; label: string }> = [
-  { status: "proposed", label: "Proposed" },
-  { status: "running", label: "In progress" },
-  { status: "succeeded", label: "Done" },
-  { status: "failed", label: "Failed" },
-  { status: "cancelled", label: "Cancelled" },
-];
-
-const STATUS_VARIANT: Record<
-  TaskStatus,
-  "default" | "secondary" | "outline" | "destructive"
-> = {
-  proposed: "outline",
-  approved: "secondary",
-  running: "default",
-  succeeded: "secondary",
-  failed: "destructive",
-  cancelled: "outline",
+type Props = {
+  params: Promise<{ agent: string }>;
+  searchParams: Promise<{ task?: string }>;
 };
 
-export default async function AgentTasksPage({
-  params,
-}: {
-  params: Promise<{ agent: string }>;
-}) {
-  const { agent: agentSlug } = await params;
+type SelectedBundle = {
+  task: Task;
+  threadId: string;
+  sessionKey: string;
+  initialEvents: TranscriptEvent[];
+  initialByteOffset: number;
+};
+
+export default async function AgentTasksPage({ params, searchParams }: Props) {
+  const [{ agent: agentSlug }, { task: selectedTaskId }] = await Promise.all([
+    params,
+    searchParams,
+  ]);
+
   const project = await getActiveProject();
   if (!project) {
     return (
@@ -48,94 +45,66 @@ export default async function AgentTasksPage({
   if (!resolved) notFound();
 
   const agentFullId = resolved.agent_id;
-  const tasks = listTasksByAgent(agentFullId);
-  const proposedCount = tasks.filter((t) => t.status === "proposed").length;
-  const byStatus = new Map<TaskStatus, Task[]>();
-  for (const t of tasks) {
-    const list = byStatus.get(t.status) ?? [];
-    list.push(t);
-    byStatus.set(t.status, list);
+
+  // Load the selected task's brief + transcript bundle if `?task=` is set.
+  // This may auto-claim a proposed task → running, so it runs BEFORE the
+  // task list is read — otherwise the list shows the pre-claim status
+  // and the selected task appears under the wrong group.
+  let selected: SelectedBundle | null = null;
+  if (selectedTaskId) {
+    selected = await loadSelectedBundle(agentFullId, selectedTaskId);
+    // Guard: drop selection if it's not on this agent (cross-agent links etc).
+    if (selected && selected.task.agent_id !== agentFullId) selected = null;
   }
 
-  return (
-    <div className="mx-auto max-w-5xl space-y-6 p-6">
-      <header className="flex items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {resolved.display_name} &middot; Tasks
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            {tasks.length === 0
-              ? "Nothing assigned yet."
-              : `${tasks.length} total · ${proposedCount} ready to start`}
-          </p>
-        </div>
-        {proposedCount > 0 && (
-          <StartAllTasksButton agentId={agentFullId} proposedCount={proposedCount} />
-        )}
-      </header>
+  const tasks = listTasksByAgent(agentFullId);
+  const proposedCount = tasks.filter((t) => t.status === "proposed").length;
 
-      {tasks.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center text-sm text-muted-foreground">
-            No tasks assigned to {resolved.display_name} yet. The CMO will create
-            tasks here when it delegates work.
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="grid gap-4 md:grid-cols-3">
-          {STATUS_GROUPS.map((group) => {
-            const items = byStatus.get(group.status) ?? [];
-            if (items.length === 0) return null;
-            return (
-              <Card key={group.status}>
-                <CardHeader className="pb-2">
-                  <CardTitle className="flex items-center justify-between text-sm font-medium">
-                    {group.label}
-                    <span className="text-xs text-muted-foreground tabular-nums">
-                      {items.length}
-                    </span>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  {items.map((t) => (
-                    <Link
-                      key={t.id}
-                      href={`/tasks/${t.id}`}
-                      className="block rounded-md border bg-card p-3 text-xs space-y-1 transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/30"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <Badge
-                          variant={STATUS_VARIANT[t.status]}
-                          className="text-[10px]"
-                        >
-                          {t.status}
-                        </Badge>
-                        <span className="text-[10px] text-muted-foreground tabular-nums">
-                          {new Date(t.updated_at).toLocaleTimeString()}
-                        </span>
-                      </div>
-                      <p className="line-clamp-2 font-medium text-foreground">
-                        {t.title ?? t.brief}
-                      </p>
-                      {t.title && (
-                        <p className="line-clamp-2 text-muted-foreground">
-                          {t.brief}
-                        </p>
-                      )}
-                      {t.status === "failed" && t.error_message && (
-                        <p className="line-clamp-2 text-destructive">
-                          {t.error_message}
-                        </p>
-                      )}
-                    </Link>
-                  ))}
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
-      )}
-    </div>
+  return (
+    <AgentTaskWorkspace
+      agentSlug={agentSlug}
+      agentFullId={agentFullId}
+      agentDisplayName={resolved.display_name}
+      tasks={tasks}
+      selected={selected}
+      proposedCount={proposedCount}
+    />
   );
+}
+
+async function loadSelectedBundle(
+  agentFullId: string,
+  taskId: string,
+): Promise<SelectedBundle | null> {
+  let task = getTask(taskId);
+  if (!task) return null;
+
+  // Lazily mint a per-task chat thread on first open. Stable forever after.
+  if (!task.thread_id) {
+    const updated = setTaskThreadIfMissing(task.id, generateTaskThreadId());
+    if (updated) task = updated;
+  }
+  if (!task.thread_id) return null;
+  const threadId = task.thread_id;
+
+  // Atomically transition proposed → running and fire the kickoff. No-op
+  // when the task isn't proposed, so reloading the page doesn't restart.
+  task = startTaskIfProposed(task);
+
+  // Resolve canonical sessionKey for /api/chat composer sends (when task
+  // is done and user wants to keep chatting). The pending key is a safe
+  // fallback for brand-new threads.
+  const session = findSessionBySessionId(agentFullId, threadId);
+  const sessionKey =
+    session?.sessionKey ?? buildPendingSessionKey(agentFullId, threadId);
+
+  const { events, byteOffset } = readTranscriptTail(agentFullId, threadId, 0);
+
+  return {
+    task,
+    threadId,
+    sessionKey,
+    initialEvents: events,
+    initialByteOffset: byteOffset,
+  };
 }
