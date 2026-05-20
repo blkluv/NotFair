@@ -53,6 +53,13 @@ type SelectedTaskBundle = {
   sessionKey: string;
   initialEvents: TranscriptEvent[];
   initialByteOffset: number;
+  /**
+   * Server-built kickoff prompt. Non-null only when this page-load was the
+   * one that flipped the task from proposed → running; the client fires it
+   * via /api/chat so the agent's response streams as SSE deltas in real
+   * time instead of arriving as a single JSONL-flushed wall of text.
+   */
+  kickoffMessage: string | null;
 };
 
 type Props = {
@@ -307,6 +314,8 @@ function SelectedTaskPanel({
       initialByteOffset={selected.initialByteOffset}
       composerDisabled={isInFlight}
       onPolled={onPolled}
+      autoKickoff={!!selected.kickoffMessage}
+      kickoffMessage={selected.kickoffMessage ?? undefined}
     />
   );
 }
