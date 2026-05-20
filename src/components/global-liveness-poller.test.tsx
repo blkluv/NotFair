@@ -34,19 +34,19 @@ describe("GlobalLivenessPoller", () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
-  it("polls router.refresh() every 5 seconds while hasInFlight is true", () => {
+  it("polls router.refresh() every 2 seconds while hasInFlight is true", () => {
     render(<GlobalLivenessPoller hasInFlight={true} />);
     expect(refresh).not.toHaveBeenCalled();
     act(() => {
-      vi.advanceTimersByTime(5_000);
+      vi.advanceTimersByTime(2_000);
     });
     expect(refresh).toHaveBeenCalledTimes(1);
     act(() => {
-      vi.advanceTimersByTime(5_000);
+      vi.advanceTimersByTime(2_000);
     });
     expect(refresh).toHaveBeenCalledTimes(2);
     act(() => {
-      vi.advanceTimersByTime(5_000);
+      vi.advanceTimersByTime(2_000);
     });
     expect(refresh).toHaveBeenCalledTimes(3);
   });
@@ -54,7 +54,7 @@ describe("GlobalLivenessPoller", () => {
   it("tears the interval down when hasInFlight flips to false", () => {
     const { rerender } = render(<GlobalLivenessPoller hasInFlight={true} />);
     act(() => {
-      vi.advanceTimersByTime(5_000);
+      vi.advanceTimersByTime(2_000);
     });
     expect(refresh).toHaveBeenCalledTimes(1);
     rerender(<GlobalLivenessPoller hasInFlight={false} />);
@@ -67,7 +67,7 @@ describe("GlobalLivenessPoller", () => {
   it("clears the interval on unmount so no stray refreshes fire", () => {
     const { unmount } = render(<GlobalLivenessPoller hasInFlight={true} />);
     act(() => {
-      vi.advanceTimersByTime(5_000);
+      vi.advanceTimersByTime(2_000);
     });
     expect(refresh).toHaveBeenCalledTimes(1);
     unmount();
@@ -85,7 +85,7 @@ describe("GlobalLivenessPoller", () => {
     expect(refresh).not.toHaveBeenCalled();
     rerender(<GlobalLivenessPoller hasInFlight={true} />);
     act(() => {
-      vi.advanceTimersByTime(5_000);
+      vi.advanceTimersByTime(2_000);
     });
     expect(refresh).toHaveBeenCalledTimes(1);
   });

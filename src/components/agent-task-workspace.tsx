@@ -278,24 +278,26 @@ function SelectedTaskPanel({
 }) {
   const router = useRouter();
   const isInFlight = TASK_IN_FLIGHT.includes(selected.task.status);
-  // Each time polling returns new events we refresh the server tree so
-  // the status badge in this panel's header + the task list grouping
-  // catch up to the JSONL — the LiveTranscript handles its own rendering
-  // updates, this hook just rebroadcasts to the rest of the page.
+  // We refresh the server tree on every in-flight poll so the status
+  // badge + sidebar in-flight counters track the DB even when nothing
+  // has landed in the JSONL transcript yet.
   //
-  // Double-refresh: when the agent emits its final reply (with the
-  // <task_status>done</task_status> block), the JSONL bytes can land
-  // BEFORE processOrchestrationBlocks runs the DB status flip. The
-  // 600ms delayed refresh catches that follow-up DB write so the badge
-  // updates without the user having to manually reload.
+  // Why: OpenClaw doesn't flush the JSONL file until session.ended —
+  // a long-running audit can spend minutes calling MCP tools (which
+  // update the DB synchronously) while the JSONL stays empty. If we
+  // only refresh on `newEvents > 0`, the badge stays stuck on
+  // "Working" until the very end of the session even though the
+  // agent already called submit_task_status seconds earlier. Polling
+  // is cheap (every 800ms in-flight, 2s otherwise) and the refresh
+  // is RSC-only.
+  //
+  // When the task is terminal AND the poll returned no new events,
+  // we stop polling — the transcript is fully drained.
   const onPolled = useCallback(
     ({ newEvents }: { newEvents: number; fileSize: number }) => {
-      if (newEvents > 0) {
+      if (newEvents > 0 || isInFlight) {
         router.refresh();
-        setTimeout(() => router.refresh(), 600);
       }
-      // Return true to stop polling once the task is terminal AND the
-      // poll returned nothing new (transcript fully drained).
       if (!isInFlight && newEvents === 0) return true;
       return false;
     },
