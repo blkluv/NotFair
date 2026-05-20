@@ -160,7 +160,10 @@ export function LiveTranscript({
   // ── Live tail polling. ─────────────────────────────────────────────
   const pollOnce = useCallback(async () => {
     try {
-      const url = `/api/agents/${agentSlug}/threads/${threadId}/transcript?offset=${byteOffset}`;
+      // Pass projectSlug explicitly: the API route would otherwise fall back
+      // to the active-project cookie, which can lag the URL on first paint
+      // after a project switch or direct deep-link.
+      const url = `/api/agents/${agentSlug}/threads/${threadId}/transcript?offset=${byteOffset}&project=${encodeURIComponent(projectSlug)}`;
       const res = await fetch(url, { cache: "no-store" });
       if (!res.ok) return { newEvents: 0 };
       const data = (await res.json()) as {
@@ -187,7 +190,7 @@ export function LiveTranscript({
     } catch {
       return { newEvents: 0 };
     }
-  }, [agentSlug, byteOffset, onPolled, threadId]);
+  }, [agentSlug, byteOffset, onPolled, projectSlug, threadId]);
 
   // Poll faster while the parent says the task is in flight — typical
   // first-task experience is "land on workspace, watch the audit run."
@@ -270,6 +273,7 @@ export function LiveTranscript({
           body: JSON.stringify({
             message: text,
             agent: agentSlug,
+            project: projectSlug,
             sessionId: threadId,
             sessionKey,
           }),

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getActiveProject } from "@/server/active-project";
+import { getProject } from "@/server/db/projects";
 import { resolveAgentBySlug } from "@/server/agent-meta";
 import { streamChatViaGateway } from "@/server/openclaw/gateway-client";
 import {
@@ -43,6 +44,12 @@ function makePerf(tag: string) {
 type ChatPostBody = {
   message: string;
   agent?: string;
+  /**
+   * URL slug of the project this chat belongs to. The page passes it down so
+   * the route doesn't have to rely on the active-project cookie, which can
+   * lag the URL on first paint after a project switch or direct deep-link.
+   */
+  project?: string;
   /** OpenClaw session UUID — used for trajectory file naming. */
   sessionId?: string;
   /**
@@ -57,14 +64,6 @@ type ChatPostBody = {
 export async function POST(request: Request) {
   const perf = makePerf("route");
   perf.mark("route_start");
-  const project = await getActiveProject();
-  perf.mark("active_project_resolved");
-  if (!project) {
-    return NextResponse.json(
-      { error: "No active project. Create one first." },
-      { status: 400 },
-    );
-  }
 
   let body: ChatPostBody;
   try {
@@ -75,6 +74,19 @@ export async function POST(request: Request) {
   perf.mark("body_parsed");
   if (!body?.message?.trim()) {
     return NextResponse.json({ error: "message is required" }, { status: 400 });
+  }
+
+  // Explicit project (from the URL slug the page knows) wins; fall back to
+  // the cookie for backwards compatibility with any non-page caller.
+  const project = body.project
+    ? getProject(body.project)
+    : await getActiveProject();
+  perf.mark("active_project_resolved");
+  if (!project) {
+    return NextResponse.json(
+      { error: "No active project. Create one first." },
+      { status: 400 },
+    );
   }
 
   const requestedSlug = (body.agent ?? "cmo").trim();

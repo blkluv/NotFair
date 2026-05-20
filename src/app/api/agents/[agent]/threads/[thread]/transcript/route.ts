@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getActiveProject } from "@/server/active-project";
+import { getProject } from "@/server/db/projects";
 import { resolveAgentBySlug } from "@/server/agent-meta";
 import { readTranscriptTail } from "@/server/openclaw/transcript-tail";
 
@@ -13,6 +14,12 @@ export const runtime = "nodejs";
  * poll this with the byte offset they last saw; we return any events
  * written since. Threads have no terminal state, so callers manage their
  * own "stop polling" signal (the task workspace gates on task.status).
+ *
+ * Project resolution: prefer the explicit `project` query param (the page
+ * knows its URL slug and passes it through), fall back to the
+ * active-project cookie. The cookie can lag the URL on first paint after a
+ * project switch or direct deep-link, so the explicit param is the source
+ * of truth when present.
  */
 export async function GET(
   request: Request,
@@ -20,7 +27,11 @@ export async function GET(
 ) {
   const { agent: agentSlug, thread: threadId } = await context.params;
 
-  const project = await getActiveProject();
+  const url = new URL(request.url);
+  const projectParam = url.searchParams.get("project");
+  const project = projectParam
+    ? getProject(projectParam)
+    : await getActiveProject();
   if (!project) {
     return NextResponse.json({ error: "no active project" }, { status: 400 });
   }
@@ -30,7 +41,6 @@ export async function GET(
     return NextResponse.json({ error: "unknown agent" }, { status: 404 });
   }
 
-  const url = new URL(request.url);
   const offsetParam = url.searchParams.get("offset");
   const byteOffset = offsetParam ? Number(offsetParam) : 0;
   const validOffset = Number.isFinite(byteOffset) && byteOffset >= 0 ? byteOffset : 0;
