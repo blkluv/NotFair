@@ -123,7 +123,7 @@ describe("AgentTaskWorkspace empty state", () => {
     render(
       <AgentTaskWorkspace
         {...baseProps({
-          tasks: [makeTask({ status: "succeeded" })],
+          tasks: [makeTask({ status: "done" })],
         })}
       />,
     );
@@ -138,9 +138,9 @@ describe("AgentTaskWorkspace in-flight summary + StartAllTasksButton", () => {
       <AgentTaskWorkspace
         {...baseProps({
           tasks: [
-            makeTask({ id: "a", display_id: "demo-1", status: "running" }),
+            makeTask({ id: "a", display_id: "demo-1", status: "working" }),
             makeTask({ id: "b", display_id: "demo-2", status: "approved" }),
-            makeTask({ id: "c", display_id: "demo-3", status: "succeeded" }),
+            makeTask({ id: "c", display_id: "demo-3", status: "done" }),
           ],
           proposedCount: 0,
         })}
@@ -169,7 +169,7 @@ describe("AgentTaskWorkspace in-flight summary + StartAllTasksButton", () => {
     render(
       <AgentTaskWorkspace
         {...baseProps({
-          tasks: [makeTask({ status: "succeeded" })],
+          tasks: [makeTask({ status: "done" })],
         })}
       />,
     );
@@ -183,15 +183,15 @@ describe("AgentTaskWorkspace task list grouping", () => {
       <AgentTaskWorkspace
         {...baseProps({
           tasks: [
-            makeTask({ id: "1", display_id: "demo-1", status: "running" }),
+            makeTask({ id: "1", display_id: "demo-1", status: "working" }),
             makeTask({ id: "2", display_id: "demo-2", status: "proposed" }),
-            makeTask({ id: "3", display_id: "demo-3", status: "succeeded" }),
+            makeTask({ id: "3", display_id: "demo-3", status: "done" }),
             makeTask({ id: "4", display_id: "demo-4", status: "failed", error_message: "boom" }),
           ],
         })}
       />,
     );
-    expect(screen.getByText("Running")).toBeInTheDocument();
+    expect(screen.getByText("Working")).toBeInTheDocument();
     expect(screen.getByText("Proposed")).toBeInTheDocument();
     expect(screen.getByText("Done")).toBeInTheDocument();
     expect(screen.getByText("Failed")).toBeInTheDocument();
@@ -251,7 +251,7 @@ describe("AgentTaskWorkspace selected-task panel", () => {
     const task = makeTask({
       display_id: "demo-42",
       title: "Audit yesterday's spend",
-      status: "running",
+      status: "working",
     });
     render(
       <AgentTaskWorkspace
@@ -269,7 +269,7 @@ describe("AgentTaskWorkspace selected-task panel", () => {
     );
     expect(screen.getAllByText("demo-42").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Audit yesterday's spend").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("running").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("working").length).toBeGreaterThan(0);
     const stub = screen.getByTestId("live-transcript");
     expect(stub.getAttribute("data-thread")).toBe("thr-1");
     expect(stub.getAttribute("data-disabled")).toBe("true");
@@ -298,7 +298,7 @@ describe("AgentTaskWorkspace selected-task panel", () => {
     const task = makeTask({
       brief: "Brief body text",
       success_criteria: "Success criteria text",
-      status: "succeeded",
+      status: "done",
     });
     render(
       <AgentTaskWorkspace
@@ -320,7 +320,7 @@ describe("AgentTaskWorkspace selected-task panel", () => {
   });
 
   it("does not render the Cancel button on terminal-status tasks", () => {
-    const task = makeTask({ status: "succeeded" });
+    const task = makeTask({ status: "done" });
     render(
       <AgentTaskWorkspace
         {...baseProps({
@@ -341,7 +341,7 @@ describe("AgentTaskWorkspace selected-task panel", () => {
 
 describe("AgentTaskWorkspace CancelTaskButton", () => {
   function renderWithRunningSelected() {
-    const task = makeTask({ display_id: "demo-77", status: "running" });
+    const task = makeTask({ display_id: "demo-77", status: "working" });
     return render(
       <AgentTaskWorkspace
         {...baseProps({

@@ -12,9 +12,9 @@ import type { TaskStatus } from "@/types";
 const STATUS_GROUPS: Array<{ status: TaskStatus; label: string }> = [
   { status: "proposed", label: "Proposed" },
   { status: "approved", label: "Approved" },
-  { status: "running", label: "Running" },
+  { status: "working", label: "Working" },
   { status: "blocked", label: "Blocked on approval" },
-  { status: "succeeded", label: "Succeeded" },
+  { status: "done", label: "Done" },
   { status: "failed", label: "Failed" },
   { status: "cancelled", label: "Cancelled" },
 ];
@@ -22,9 +22,9 @@ const STATUS_GROUPS: Array<{ status: TaskStatus; label: string }> = [
 const STATUS_VARIANT: Record<TaskStatus, "default" | "secondary" | "outline" | "destructive"> = {
   proposed: "outline",
   approved: "secondary",
-  running: "default",
+  working: "default",
   blocked: "secondary",
-  succeeded: "secondary",
+  done: "secondary",
   failed: "destructive",
   cancelled: "outline",
 };

@@ -32,7 +32,7 @@ export async function wakeTaskOnApprovalResolution(approval: Approval): Promise<
   // Don't restart agents on terminal tasks — the user may have cancelled
   // while the approval was outstanding.
   if (
-    task.status === "succeeded" ||
+    task.status === "done" ||
     task.status === "failed" ||
     task.status === "cancelled"
   ) {

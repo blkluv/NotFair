@@ -191,7 +191,7 @@ describe("listTasks", () => {
         `INSERT INTO tasks (id, display_id, project_slug, agent_id, brief, status, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run("t2", "acme-2", "acme", "x", "second", "running", "2026-01-02T00:00:00.000Z", "2026-01-02T00:00:00.000Z");
+      .run("t2", "acme-2", "acme", "x", "second", "working", "2026-01-02T00:00:00.000Z", "2026-01-02T00:00:00.000Z");
 
     const rows = listTasks("acme");
     expect(rows.map((r) => r.brief)).toEqual(["second", "first"]);
@@ -200,10 +200,10 @@ describe("listTasks", () => {
   it("filters by status when provided", () => {
     seedProject();
     createTask({ project_slug: "acme", agent_id: "x", brief: "p" });
-    createTask({ project_slug: "acme", agent_id: "x", brief: "r", status: "running" });
+    createTask({ project_slug: "acme", agent_id: "x", brief: "r", status: "working" });
     expect(listTasks("acme", "proposed")).toHaveLength(1);
-    expect(listTasks("acme", "running")).toHaveLength(1);
-    expect(listTasks("acme", "succeeded")).toHaveLength(0);
+    expect(listTasks("acme", "working")).toHaveLength(1);
+    expect(listTasks("acme", "done")).toHaveLength(0);
   });
 
   it("isolates by project", () => {
@@ -234,9 +234,9 @@ describe("listTasksByAgent", () => {
       project_slug: "acme",
       agent_id: "a1",
       brief: "r",
-      status: "running",
+      status: "working",
     });
-    expect(listTasksByAgent("a1", "running")).toHaveLength(1);
+    expect(listTasksByAgent("a1", "working")).toHaveLength(1);
     expect(listTasksByAgent("a1", "proposed")).toHaveLength(1);
   });
 
@@ -259,19 +259,19 @@ describe("inFlightCountsByAgent", () => {
       project_slug: "acme",
       agent_id: "ads",
       brief: "3",
-      status: "running",
+      status: "working",
     });
     createTask({
       project_slug: "acme",
       agent_id: "ads",
       brief: "4",
-      status: "succeeded",
+      status: "done",
     });
     createTask({
       project_slug: "acme",
       agent_id: "seo",
       brief: "1",
-      status: "running",
+      status: "working",
     });
     createTask({
       project_slug: "acme",
@@ -293,7 +293,7 @@ describe("inFlightCountsByAgent", () => {
 
   it("returns an empty map when no in-flight tasks exist", () => {
     seedProject();
-    createTask({ project_slug: "acme", agent_id: "x", brief: "1", status: "succeeded" });
+    createTask({ project_slug: "acme", agent_id: "x", brief: "1", status: "done" });
     const map = inFlightCountsByAgent("acme");
     expect(map.size).toBe(0);
   });
@@ -357,12 +357,12 @@ describe("updateTask", () => {
     const t = createTask({ project_slug: "acme", agent_id: "x", brief: "b" });
     await new Promise((r) => setTimeout(r, 5));
     const out = updateTask(t.id, {
-      status: "succeeded",
+      status: "done",
       result: { hello: "world" },
       error_message: null,
     });
     expect(out).not.toBeNull();
-    expect(out!.status).toBe("succeeded");
+    expect(out!.status).toBe("done");
     expect(out!.result_json).toBe(JSON.stringify({ hello: "world" }));
     expect(out!.error_message).toBeNull();
     expect(Date.parse(out!.updated_at)).toBeGreaterThanOrEqual(
@@ -389,7 +389,7 @@ describe("updateTask", () => {
   });
 
   it("returns null when task doesn't exist", () => {
-    expect(updateTask("missing", { status: "running" })).toBeNull();
+    expect(updateTask("missing", { status: "working" })).toBeNull();
   });
 
   it("rejects invalid status via CHECK constraint", () => {
@@ -408,7 +408,7 @@ describe("claimProposedTask", () => {
     const t = createTask({ project_slug: "acme", agent_id: "x", brief: "b" });
     const out = claimProposedTask(t.id);
     expect(out).not.toBeNull();
-    expect(out!.status).toBe("running");
+    expect(out!.status).toBe("working");
   });
 
   it("returns null when the task is already past proposed", () => {
@@ -417,7 +417,7 @@ describe("claimProposedTask", () => {
       project_slug: "acme",
       agent_id: "x",
       brief: "b",
-      status: "running",
+      status: "working",
     });
     expect(claimProposedTask(t.id)).toBeNull();
   });
@@ -425,9 +425,9 @@ describe("claimProposedTask", () => {
   it("returns null when the task is terminal (succeeded)", () => {
     seedProject();
     const t = createTask({ project_slug: "acme", agent_id: "x", brief: "b" });
-    updateTask(t.id, { status: "succeeded" });
+    updateTask(t.id, { status: "done" });
     expect(claimProposedTask(t.id)).toBeNull();
-    expect(getTask(t.id)!.status).toBe("succeeded"); // not regressed
+    expect(getTask(t.id)!.status).toBe("done"); // not regressed
   });
 
   it("returns null when the task doesn't exist", () => {
@@ -437,7 +437,7 @@ describe("claimProposedTask", () => {
   it("is single-shot: a second call after a successful claim returns null", () => {
     seedProject();
     const t = createTask({ project_slug: "acme", agent_id: "x", brief: "b" });
-    expect(claimProposedTask(t.id)!.status).toBe("running");
+    expect(claimProposedTask(t.id)!.status).toBe("working");
     expect(claimProposedTask(t.id)).toBeNull();
   });
 });
@@ -450,7 +450,7 @@ describe("markTaskBlocked + unblockTask", () => {
     const blocked = markTaskBlocked(t.id);
     expect(blocked?.status).toBe("blocked");
     const unblocked = unblockTask(t.id);
-    expect(unblocked?.status).toBe("running");
+    expect(unblocked?.status).toBe("working");
   });
 
   it("markTaskBlocked accepts proposed + approved as source states", () => {
@@ -474,10 +474,10 @@ describe("markTaskBlocked + unblockTask", () => {
       project_slug: "acme",
       agent_id: "x",
       brief: "b",
-      status: "succeeded",
+      status: "done",
     });
     const after = markTaskBlocked(t.id);
-    expect(after?.status).toBe("succeeded");
+    expect(after?.status).toBe("done");
   });
 
   it("unblockTask is a no-op when the task isn't blocked", () => {
@@ -485,7 +485,7 @@ describe("markTaskBlocked + unblockTask", () => {
     const t = createTask({ project_slug: "acme", agent_id: "x", brief: "b" });
     claimProposedTask(t.id);
     const after = unblockTask(t.id);
-    expect(after?.status).toBe("running"); // unchanged
+    expect(after?.status).toBe("working"); // unchanged
   });
 
   it("inFlightCountsByAgent counts blocked tasks too", () => {

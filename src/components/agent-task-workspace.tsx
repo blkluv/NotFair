@@ -25,14 +25,14 @@ import { projectHref } from "@/lib/project-href";
 import type { TranscriptEvent } from "@/server/openclaw/transcript-tail";
 import type { Approval, Task, TaskStatus } from "@/types";
 
-const TASK_IN_FLIGHT: TaskStatus[] = ["proposed", "approved", "running", "blocked"];
+const TASK_IN_FLIGHT: TaskStatus[] = ["proposed", "approved", "working", "blocked"];
 
 const STATUS_GROUPS: Array<{ status: TaskStatus; label: string }> = [
-  { status: "running", label: "Running" },
+  { status: "working", label: "Working" },
   { status: "blocked", label: "Waiting on approval" },
   { status: "proposed", label: "Proposed" },
   { status: "approved", label: "Approved" },
-  { status: "succeeded", label: "Done" },
+  { status: "done", label: "Done" },
   { status: "failed", label: "Failed" },
   { status: "cancelled", label: "Cancelled" },
 ];
@@ -43,9 +43,9 @@ const STATUS_VARIANT: Record<
 > = {
   proposed: "outline",
   approved: "secondary",
-  running: "default",
+  working: "default",
   blocked: "secondary",
-  succeeded: "secondary",
+  done: "secondary",
   failed: "destructive",
   cancelled: "outline",
 };
@@ -96,7 +96,7 @@ export function AgentTaskWorkspace({
 
   const totalCount = tasks.length;
   const inFlightCount =
-    (grouped.get("running")?.length ?? 0) +
+    (grouped.get("working")?.length ?? 0) +
     (grouped.get("proposed")?.length ?? 0) +
     (grouped.get("approved")?.length ?? 0);
 
@@ -207,7 +207,7 @@ export function AgentTaskWorkspace({
                     </h1>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    {(selected.task.status === "running" ||
+                    {(selected.task.status === "working" ||
                       selected.task.status === "proposed" ||
                       selected.task.status === "approved") && (
                       <>
@@ -402,9 +402,9 @@ function TaskRow({
   selected: boolean;
   onSelect: () => void;
 }) {
-  const isRunning = task.status === "running";
+  const isRunning = task.status === "working";
   const isInFlight =
-    task.status === "running" ||
+    task.status === "working" ||
     task.status === "proposed" ||
     task.status === "approved";
   return (
@@ -433,7 +433,7 @@ function TaskRow({
           <span
             className={cn(
               selected ? "font-medium text-foreground" : "text-foreground/90",
-              !isInFlight && task.status !== "running" && "text-muted-foreground",
+              !isInFlight && task.status !== "working" && "text-muted-foreground",
             )}
           >
             {task.title ?? task.brief.slice(0, 80)}
@@ -454,7 +454,7 @@ function TaskRow({
 
 function StatusGlyph({ status }: { status: TaskStatus }) {
   switch (status) {
-    case "succeeded":
+    case "done":
       return <CheckCircle2 className="size-3.5 text-emerald-600" />;
     case "failed":
       return <XCircle className="size-3.5 text-destructive" />;
@@ -462,7 +462,7 @@ function StatusGlyph({ status }: { status: TaskStatus }) {
       return <Circle className="size-3.5 text-muted-foreground" />;
     case "approved":
       return <CircleDot className="size-3.5 text-sky-600" />;
-    case "running":
+    case "working":
       return <Loader2 className="size-3.5 animate-spin text-sky-600" />;
     case "blocked":
       return <CircleDot className="size-3.5 text-amber-600" />;

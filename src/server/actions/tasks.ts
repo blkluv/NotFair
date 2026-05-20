@@ -91,7 +91,7 @@ export async function cancelTaskAction(
     return { ok: false, error: "Task isn't in the active project." };
   }
   if (
-    task.status === "succeeded" ||
+    task.status === "done" ||
     task.status === "failed" ||
     task.status === "cancelled"
   ) {

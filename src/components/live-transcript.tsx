@@ -863,7 +863,7 @@ function ToolGroup({ tools }: { tools: ToolEntry[] }) {
             <span className="inline-flex items-center gap-1.5">
               <RunningDot size="sm" aria-label="" />
               {tools.length === 1
-                ? "running"
+                ? "working"
                 : `${tools.length} steps · ${inFlightCount} live`}
             </span>
           ) : (

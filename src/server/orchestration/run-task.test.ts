@@ -76,7 +76,7 @@ describe("startTaskIfProposed", () => {
 
   it("returns the input task untouched when the claim fails (already running)", () => {
     claimProposedTaskMock.mockReturnValue(null);
-    const task = makeTask({ status: "running" });
+    const task = makeTask({ status: "working" });
     const result = startTaskIfProposed(task);
     expect(result).toBe(task);
     // Kickoff must not be triggered when the claim doesn't succeed.
@@ -84,7 +84,7 @@ describe("startTaskIfProposed", () => {
   });
 
   it("returns the claimed task and fires kickoff in the background when claim succeeds", async () => {
-    const claimed = makeTask({ status: "running" });
+    const claimed = makeTask({ status: "working" });
     claimProposedTaskMock.mockReturnValue(claimed);
 
     const result = startTaskIfProposed(makeTask({ status: "proposed" }));
@@ -98,7 +98,7 @@ describe("startTaskIfProposed", () => {
 
   it("swallows kickoff errors so the caller (synchronous) never throws", async () => {
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const claimed = makeTask({ status: "running", thread_id: null });
+    const claimed = makeTask({ status: "working", thread_id: null });
     claimProposedTaskMock.mockReturnValue(claimed);
     // Force the kickoff to throw — thread assignment will fail because both
     // claim + setTaskThreadIfMissing return null.

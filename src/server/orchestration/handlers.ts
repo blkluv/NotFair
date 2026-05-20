@@ -175,14 +175,14 @@ export function handleTaskStatus(
   if (
     task.status === "cancelled" ||
     task.status === "failed" ||
-    task.status === "succeeded"
+    task.status === "done"
   ) {
     return { ok: true, data: { task_id: task.id, status: task.status } };
   }
 
   // Closing a task that's gated on an unresolved approval is almost always
   // a mistake — the agent thinks "I queued the approval, my work is done"
-  // and prematurely marks the task succeeded, orphaning the approval in the
+  // and prematurely marks the task done, orphaning the approval in the
   // inbox. Refuse the transition and tell the agent what's blocking it.
   // The exception is `failed`, which we DO allow even with pending
   // approvals (an agent should be able to bail out of a stuck flow).
@@ -199,14 +199,9 @@ export function handleTaskStatus(
     }
   }
 
-  const newStatus: TaskStatus =
-    input.status === "working"
-      ? "running"
-      : input.status === "done"
-        ? "succeeded"
-        : input.status === "blocked"
-          ? "blocked"
-          : "failed";
+  // No mapping layer anymore: the agent-facing enum (working/done/blocked/
+  // failed) IS the DB enum. Migration 007 unified the vocabularies.
+  const newStatus: TaskStatus = input.status;
 
   updateTask(task.id, {
     status: newStatus,
@@ -418,7 +413,7 @@ export function handleListMyTasks(
     const inFlight = new Set<TaskStatus>([
       "proposed",
       "approved",
-      "running",
+      "working",
       "blocked",
     ]);
     all = all.filter((t) => inFlight.has(t.status));
@@ -518,7 +513,7 @@ export function handleCancelTask(
     };
   }
   if (
-    task.status === "succeeded" ||
+    task.status === "done" ||
     task.status === "failed" ||
     task.status === "cancelled"
   ) {
@@ -667,11 +662,11 @@ export type TaskStatusInfo = {
 };
 
 const TASK_STATUS_INFO: TaskStatusInfo[] = [
-  { value: "proposed", description: "Task created, awaiting kickoff or user approval.", terminal: false, next: ["approved", "running", "cancelled"] },
-  { value: "approved", description: "User approved a guarded task; ready for the assignee to pick up.", terminal: false, next: ["running", "cancelled"] },
-  { value: "running", description: "Assignee is actively working.", terminal: false, next: ["blocked", "succeeded", "failed", "cancelled"] },
-  { value: "blocked", description: "Waiting on a user decision, an approval, or a missing input.", terminal: false, next: ["running", "succeeded", "failed", "cancelled"] },
-  { value: "succeeded", description: "Task complete (terminal).", terminal: true, next: [] },
+  { value: "proposed", description: "Task created, awaiting kickoff or user approval.", terminal: false, next: ["approved", "working", "cancelled"] },
+  { value: "approved", description: "User approved a guarded task; ready for the assignee to pick up.", terminal: false, next: ["working", "cancelled"] },
+  { value: "working", description: "Assignee is actively working.", terminal: false, next: ["blocked", "done", "failed", "cancelled"] },
+  { value: "blocked", description: "Waiting on a user decision, an approval, or a missing input.", terminal: false, next: ["working", "done", "failed", "cancelled"] },
+  { value: "done", description: "Task complete (terminal).", terminal: true, next: [] },
   { value: "failed", description: "Task could not complete (terminal). error_message has the reason.", terminal: true, next: [] },
   { value: "cancelled", description: "User or CMO cancelled before completion (terminal).", terminal: true, next: [] },
 ];

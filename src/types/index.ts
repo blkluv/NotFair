@@ -19,9 +19,9 @@ export type Project = {
 export type TaskStatus =
   | "proposed"
   | "approved"
-  | "running"
+  | "working"
   | "blocked"
-  | "succeeded"
+  | "done"
   | "failed"
   | "cancelled";
 

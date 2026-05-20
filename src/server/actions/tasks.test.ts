@@ -109,8 +109,8 @@ describe("startAllProposedTasksAction", () => {
     const t2 = makeTask({ id: "t2" });
     listTasksByAgentMock.mockReturnValue([t1, t2]);
     claimProposedTaskMock.mockImplementation((id: string) => {
-      if (id === "t1") return { ...t1, status: "running" };
-      if (id === "t2") return { ...t2, status: "running" };
+      if (id === "t1") return { ...t1, status: "working" };
+      if (id === "t2") return { ...t2, status: "working" };
       return null;
     });
 
@@ -134,7 +134,7 @@ describe("startAllProposedTasksAction", () => {
     const t2 = makeTask({ id: "t2" });
     listTasksByAgentMock.mockReturnValue([t1, t2]);
     claimProposedTaskMock.mockImplementation((id: string) => {
-      if (id === "t1") return { ...t1, status: "running" };
+      if (id === "t1") return { ...t1, status: "working" };
       return null;
     });
 
@@ -153,7 +153,7 @@ describe("startAllProposedTasksAction", () => {
     const tMine = makeTask({ id: "t-mine", project_slug: "demo" });
     const tOther = makeTask({ id: "t-other", project_slug: "other" });
     listTasksByAgentMock.mockReturnValue([tMine, tOther]);
-    claimProposedTaskMock.mockReturnValue({ ...tMine, status: "running" });
+    claimProposedTaskMock.mockReturnValue({ ...tMine, status: "working" });
 
     const out = await startAllProposedTasksAction("demo-google-ads");
     expect(out.ok).toBe(true);
@@ -166,7 +166,7 @@ describe("startAllProposedTasksAction", () => {
     getActiveProjectMock.mockResolvedValue(makeProject());
     const t = makeTask({ id: "t1" });
     listTasksByAgentMock.mockReturnValue([t]);
-    claimProposedTaskMock.mockReturnValue({ ...t, status: "running" });
+    claimProposedTaskMock.mockReturnValue({ ...t, status: "working" });
     runTaskKickoffServerSideMock.mockRejectedValue(new Error("kickoff boom"));
 
     const out = await startAllProposedTasksAction("demo-google-ads");
@@ -218,7 +218,7 @@ describe("cancelTaskAction", () => {
     expect(updateTaskMock).not.toHaveBeenCalled();
   });
 
-  it.each(["succeeded", "failed", "cancelled"] as const)(
+  it.each(["done", "failed", "cancelled"] as const)(
     "returns ok:false when the task is already %s",
     async (status) => {
       getActiveProjectMock.mockResolvedValue(makeProject());
@@ -229,7 +229,7 @@ describe("cancelTaskAction", () => {
     },
   );
 
-  it.each(["proposed", "approved", "running"] as const)(
+  it.each(["proposed", "approved", "working"] as const)(
     "cancels the task when it is in non-terminal state %s",
     async (status) => {
       getActiveProjectMock.mockResolvedValue(makeProject());
@@ -249,7 +249,7 @@ describe("cancelTaskAction", () => {
 
   it("accepts a display_id and forwards it to getTask", async () => {
     getActiveProjectMock.mockResolvedValue(makeProject());
-    getTaskMock.mockReturnValue(makeTask({ id: "uuid-xyz", status: "running" }));
+    getTaskMock.mockReturnValue(makeTask({ id: "uuid-xyz", status: "working" }));
     await cancelTaskAction("demo-7");
     expect(getTaskMock).toHaveBeenCalledWith("demo-7");
     // updateTask is keyed by the row PK, not the display_id input.

@@ -51,7 +51,7 @@ export default async function ProjectHomePage({
   // Intentionally NOT calling openclaw here. The cron tab is the source of
   // truth for scheduled jobs; calling `openclaw cron list` from the home page
   // would block render for 5-15s on some machines. Show a link instead.
-  const running = tasks.filter((t) => t.status === "running").length;
+  const running = tasks.filter((t) => t.status === "working").length;
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">

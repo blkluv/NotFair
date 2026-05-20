@@ -110,7 +110,7 @@ describe("handleJsonRpc — tools/call submit_task_status", () => {
       display_id: "demo-1",
       project_slug: "demo",
       agent_id: "demo-google-ads",
-      status: "running",
+      status: "working",
     });
     const r = await call({
       jsonrpc: "2.0",
@@ -133,7 +133,7 @@ describe("handleJsonRpc — tools/call submit_task_status", () => {
     expect(updateTaskMock).toHaveBeenCalledWith(
       "t-uuid",
       expect.objectContaining({
-        status: "succeeded",
+        status: "done",
         result: { summary: "shipped the change" },
       }),
     );
@@ -151,7 +151,7 @@ describe("handleJsonRpc — tools/call submit_task_status", () => {
       display_id: "x-1",
       project_slug: "x",
       agent_id: "x-agent",
-      status: "running",
+      status: "working",
     });
     await call({
       jsonrpc: "2.0",
@@ -179,7 +179,7 @@ describe("handleJsonRpc — tools/call submit_task_status", () => {
       display_id: "x-1",
       project_slug: "x",
       agent_id: "x-agent",
-      status: "running",
+      status: "working",
     });
     await call({
       jsonrpc: "2.0",
@@ -235,7 +235,7 @@ describe("handleJsonRpc — tools/call submit_task_status", () => {
       display_id: "x-1",
       project_slug: "demo",
       agent_id: "demo-google-ads",
-      status: "running",
+      status: "working",
     });
     const r = await call({
       jsonrpc: "2.0",
@@ -265,7 +265,7 @@ describe("handleJsonRpc — tools/call submit_task_status", () => {
       display_id: "x-1",
       project_slug: "x",
       agent_id: "x-agent",
-      status: "succeeded",
+      status: "done",
     });
     const r = await call({
       jsonrpc: "2.0",

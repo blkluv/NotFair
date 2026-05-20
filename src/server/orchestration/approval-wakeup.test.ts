@@ -106,7 +106,7 @@ describe("wakeTaskOnApprovalResolution", () => {
   });
 
   it("is a no-op when the task is terminal (succeeded/failed/cancelled)", async () => {
-    getTaskMock.mockReturnValue(makeTask({ status: "succeeded" }));
+    getTaskMock.mockReturnValue(makeTask({ status: "done" }));
     await wakeTaskOnApprovalResolution(makeApproval());
     expect(streamMock).not.toHaveBeenCalled();
     expect(unblockTaskMock).not.toHaveBeenCalled();

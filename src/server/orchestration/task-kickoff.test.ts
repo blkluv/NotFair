@@ -14,7 +14,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     brief: "Add the Google Ads conversion tag to /thanks.",
     success_criteria: "Tag fires on /thanks and a test conv lands in Google Ads.",
     deadline_iso: null,
-    status: "running",
+    status: "working",
     result_json: null,
     error_message: null,
     thread_id: "thread-1",

@@ -36,7 +36,7 @@ vi.mock("@/server/agent-meta", () => ({
 vi.mock("./run-task", () => ({
   startTaskIfProposed: (task: { id: string; status: string }) => ({
     ...task,
-    status: "running",
+    status: "working",
   }),
 }));
 
@@ -213,7 +213,7 @@ describe("handleTaskStatus — cannot-close-with-pending-approval invariant", ()
       { task_id: t.id, status: "done", summary: "shipped" },
       { project_slug: "demo", agent_id: "demo-google-ads" },
     );
-    expect(r.ok && r.data.status).toBe("succeeded");
+    expect(r.ok && r.data.status).toBe("done");
   });
 });
 
@@ -221,7 +221,7 @@ describe("handleListMyTasks", () => {
   it("returns only in-flight tasks by default, filtered to this project + agent", () => {
     createTask({ project_slug: "demo", agent_id: "demo-google-ads", brief: "a", title: "A" });
     const t2 = createTask({ project_slug: "demo", agent_id: "demo-google-ads", brief: "b", title: "B" });
-    testDb.prepare("UPDATE tasks SET status='succeeded' WHERE id = ?").run(t2.id);
+    testDb.prepare("UPDATE tasks SET status='done' WHERE id = ?").run(t2.id);
     createTask({ project_slug: "demo", agent_id: "demo-seo", brief: "not mine" });
     createTask({ project_slug: "other", agent_id: "other-google-ads", brief: "other proj" });
 
@@ -237,7 +237,7 @@ describe("handleListMyTasks", () => {
   it("status='all' returns terminal + in-flight", () => {
     createTask({ project_slug: "demo", agent_id: "demo-google-ads", brief: "a", title: "A" });
     const t2 = createTask({ project_slug: "demo", agent_id: "demo-google-ads", brief: "b", title: "B" });
-    testDb.prepare("UPDATE tasks SET status='succeeded' WHERE id = ?").run(t2.id);
+    testDb.prepare("UPDATE tasks SET status='done' WHERE id = ?").run(t2.id);
 
     const r = handleListMyTasks(
       { status: "all" },
@@ -246,13 +246,13 @@ describe("handleListMyTasks", () => {
     expect(r.ok && r.data.length).toBe(2);
   });
 
-  it("status='succeeded' narrows", () => {
+  it("status='done' narrows", () => {
     const t1 = createTask({ project_slug: "demo", agent_id: "demo-google-ads", brief: "a" });
-    testDb.prepare("UPDATE tasks SET status='succeeded' WHERE id = ?").run(t1.id);
+    testDb.prepare("UPDATE tasks SET status='done' WHERE id = ?").run(t1.id);
     createTask({ project_slug: "demo", agent_id: "demo-google-ads", brief: "b" });
 
     const r = handleListMyTasks(
-      { status: "succeeded" },
+      { status: "done" },
       { project_slug: "demo", agent_id: "demo-google-ads" },
     );
     expect(r.ok && r.data.length).toBe(1);
@@ -311,7 +311,7 @@ describe("handleUpdateTask", () => {
 describe("handleCancelTask", () => {
   it("flips a running task to cancelled with reason", () => {
     const t = createTask({ project_slug: "demo", agent_id: "demo-google-ads", brief: "x" });
-    testDb.prepare("UPDATE tasks SET status='running' WHERE id = ?").run(t.id);
+    testDb.prepare("UPDATE tasks SET status='working' WHERE id = ?").run(t.id);
     const r = handleCancelTask(
       { task_id: t.id, reason: "no longer needed" },
       { project_slug: "demo", agent_id: "demo-cmo" },
@@ -322,12 +322,12 @@ describe("handleCancelTask", () => {
 
   it("is a no-op on already-terminal tasks", () => {
     const t = createTask({ project_slug: "demo", agent_id: "demo-google-ads", brief: "x" });
-    testDb.prepare("UPDATE tasks SET status='succeeded' WHERE id = ?").run(t.id);
+    testDb.prepare("UPDATE tasks SET status='done' WHERE id = ?").run(t.id);
     const r = handleCancelTask(
       { task_id: t.id },
       { project_slug: "demo", agent_id: "demo-cmo" },
     );
-    expect(r.ok && r.data.status).toBe("succeeded");
+    expect(r.ok && r.data.status).toBe("done");
   });
 });
 
@@ -430,15 +430,15 @@ describe("enum discovery handlers", () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.data.map((s) => s.value).sort()).toEqual(
-      ["approved", "blocked", "cancelled", "failed", "proposed", "running", "succeeded"].sort(),
+      ["approved", "blocked", "cancelled", "failed", "proposed", "working", "done"].sort(),
     );
-    const succeeded = r.data.find((s) => s.value === "succeeded")!;
+    const succeeded = r.data.find((s) => s.value === "done")!;
     expect(succeeded.terminal).toBe(true);
     expect(succeeded.next).toEqual([]);
-    const running = r.data.find((s) => s.value === "running")!;
+    const running = r.data.find((s) => s.value === "working")!;
     expect(running.terminal).toBe(false);
     expect(running.next).toContain("blocked");
-    expect(running.next).toContain("succeeded");
+    expect(running.next).toContain("done");
   });
 
   it("list_approval_action_types marks cost-required types", () => {

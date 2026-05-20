@@ -145,7 +145,7 @@ export function listTasksByAgent(agent_id: string, status?: TaskStatus): Task[] 
 /**
  * Map of `agent_id → in-flight task count` for a single project. Drives the
  * sidebar's per-agent live-task badge. "In flight" means proposed (kickoff
- * pending), approved, or running. Terminal states (succeeded/failed/cancelled)
+ * pending), approved, working, or blocked. Terminal states (done/failed/cancelled)
  * never count.
  */
 export function inFlightCountsByAgent(
@@ -156,7 +156,7 @@ export function inFlightCountsByAgent(
     .prepare(
       `SELECT agent_id, COUNT(*) as count
        FROM tasks
-       WHERE project_slug = ? AND status IN ('proposed', 'approved', 'running', 'blocked')
+       WHERE project_slug = ? AND status IN ('proposed', 'approved', 'working', 'blocked')
        GROUP BY agent_id`,
     )
     .all(project_slug) as Array<{ agent_id: string; count: number }>;
@@ -189,11 +189,11 @@ export function updateTask(id: string, update: UpdateTaskInput): Task | null {
 }
 
 /**
- * Atomically flip a task from `proposed` to `running` and return the post-flip
+ * Atomically flip a task from `proposed` to `working` and return the post-flip
  * row, or null when no claim happened (already started, already terminal, row
  * missing). The conditional WHERE clause is the whole point — callers
  * (kickoff entry points, "Start all" batch) can never accidentally regress a
- * `succeeded`/`failed`/`cancelled` row back to `running` by passing in a
+ * `done`/`failed`/`cancelled` row back to `working` by passing in a
  * stale in-memory task snapshot. better-sqlite3 is synchronous, so the
  * read-back here cannot race with a concurrent writer in this process.
  */
@@ -202,7 +202,7 @@ export function claimProposedTask(id: string): Task | null {
   const now = new Date().toISOString();
   const info = db
     .prepare(
-      "UPDATE tasks SET status = 'running', updated_at = ? WHERE id = ? AND status = 'proposed'",
+      "UPDATE tasks SET status = 'working', updated_at = ? WHERE id = ? AND status = 'proposed'",
     )
     .run(now, id);
   if (info.changes === 0) return null;
@@ -210,28 +210,28 @@ export function claimProposedTask(id: string): Task | null {
 }
 
 /**
- * Flip a running task to `blocked` (waiting on an approval). Only transitions
- * from `running` or `proposed` so we don't undo a terminal state. Returns
+ * Flip a working task to `blocked` (waiting on an approval). Only transitions
+ * from `working` or `proposed` so we don't undo a terminal state. Returns
  * the post-flip row, or the current row when the transition didn't apply.
  */
 export function markTaskBlocked(id: string): Task | null {
   const db = getDb();
   const now = new Date().toISOString();
   db.prepare(
-    "UPDATE tasks SET status = 'blocked', updated_at = ? WHERE id = ? AND status IN ('running','proposed','approved')",
+    "UPDATE tasks SET status = 'blocked', updated_at = ? WHERE id = ? AND status IN ('working','proposed','approved')",
   ).run(now, id);
   return getTask(id);
 }
 
 /**
- * Flip a blocked task back to running once its approval resolves. No-op when
+ * Flip a blocked task back to working once its approval resolves. No-op when
  * the task isn't blocked (e.g., already terminal because the user cancelled).
  */
 export function unblockTask(id: string): Task | null {
   const db = getDb();
   const now = new Date().toISOString();
   db.prepare(
-    "UPDATE tasks SET status = 'running', updated_at = ? WHERE id = ? AND status = 'blocked'",
+    "UPDATE tasks SET status = 'working', updated_at = ? WHERE id = ? AND status = 'blocked'",
   ).run(now, id);
   return getTask(id);
 }

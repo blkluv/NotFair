@@ -289,9 +289,9 @@ async function handleGetTaskTool(input: unknown): Promise<ToolResult> {
 const TASK_STATUS_FILTER_VALUES = [
   "proposed",
   "approved",
-  "running",
+  "working",
   "blocked",
-  "succeeded",
+  "done",
   "failed",
   "cancelled",
   "in_flight",
@@ -334,9 +334,9 @@ const listTasksInput = z.object({
     .enum([
       "proposed",
       "approved",
-      "running",
+      "working",
       "blocked",
-      "succeeded",
+      "done",
       "failed",
       "cancelled",
     ])

@@ -223,7 +223,7 @@ describe("setOnboardingAccountAction", () => {
         project_slug: "acme",
         agent_id: "acme-cmo",
         title: "Audit the account and propose a starter playbook",
-        status: "running",
+        status: "working",
       },
     ]);
     const r = await setOnboardingAccountAction("acme", "3251706605");
