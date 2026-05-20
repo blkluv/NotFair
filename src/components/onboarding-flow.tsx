@@ -181,7 +181,7 @@ function ConnectStep({ slug }: { slug: string }) {
               onClick={onSkip}
               variant="ghost"
               disabled={busy}
-              aria-label="Skip Google Ads connection for now and go to chat"
+              aria-label="Skip Google Ads connection for now and go to CMO tasks"
             >
               Skip for now
             </Button>

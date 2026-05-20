@@ -10,7 +10,6 @@ import {
   type TranscriptEvent,
 } from "@/server/openclaw/transcript-tail";
 import { generateTaskThreadId } from "@/server/orchestration/process-blocks";
-import { startTaskIfProposed } from "@/server/orchestration/run-task";
 import type { Task } from "@/types";
 
 type Props = {
@@ -39,9 +38,9 @@ export default async function AgentTasksPage({ params, searchParams }: Props) {
   const agentFullId = resolved.agent_id;
 
   // Load the selected task's brief + transcript bundle if `?task=` is set.
-  // This may auto-claim a proposed task → running, so it runs BEFORE the
-  // task list is read — otherwise the list shows the pre-claim status
-  // and the selected task appears under the wrong group.
+  // Tasks are kicked off at creation time (onboarding action + the CMO's
+  // <create_task> handler both call startTaskIfProposed), so this path is
+  // read-only — it never mutates task status.
   let selected: SelectedBundle | null = null;
   if (selectedTaskId) {
     selected = await loadSelectedBundle(agentFullId, selectedTaskId);
@@ -79,10 +78,6 @@ async function loadSelectedBundle(
   }
   if (!task.thread_id) return null;
   const threadId = task.thread_id;
-
-  // Atomically transition proposed → running and fire the kickoff. No-op
-  // when the task isn't proposed, so reloading the page doesn't restart.
-  task = startTaskIfProposed(task);
 
   // Resolve canonical sessionKey for /api/chat composer sends (when task
   // is done and user wants to keep chatting). The pending key is a safe

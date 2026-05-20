@@ -2,27 +2,27 @@ import {
   buildPendingSessionKey,
 } from "@/server/openclaw/sessions";
 import { streamChatViaGateway } from "@/server/openclaw/gateway-client";
-import { setTaskThreadIfMissing, updateTask } from "@/server/db/tasks";
+import { claimProposedTask, setTaskThreadIfMissing, updateTask } from "@/server/db/tasks";
 import type { Task } from "@/types";
 
 import { generateTaskThreadId, processOrchestrationBlocks } from "./process-blocks";
 import { buildTaskKickoffMessage } from "./task-kickoff";
 
 /**
- * Idempotent "claim and kickoff" — flips a proposed task to running and
- * fires the server-side kickoff. No-op when the task isn't proposed (already
- * started, already done, etc.). Used by the agent workspace so opening a
- * proposed task auto-starts it the same way "Start all" does for batches,
- * without bouncing through the chat client.
+ * Idempotent "claim and kickoff" — atomically flips a proposed task to
+ * running and fires the server-side kickoff. No-op when the row is already
+ * running, terminal, or missing. Used by `<create_task>` handling and the
+ * onboarding audit-task path; both callers operate on freshly-created tasks.
  *
- * Returns the post-transition task (still proposed if no claim happened, or
- * running on success). The kickoff itself runs fire-and-forget — callers
- * shouldn't await it; the workspace's live transcript polling will reveal
- * progress.
+ * The claim is a conditional SQL UPDATE (`WHERE status = 'proposed'`), so
+ * even if a stale in-memory `task` snapshot is passed in, the DB cannot
+ * regress a terminal row back to running.
+ *
+ * Returns the post-transition task (running on success, the input task
+ * otherwise). The kickoff runs fire-and-forget — callers shouldn't await it.
  */
 export function startTaskIfProposed(task: Task): Task {
-  if (task.status !== "proposed") return task;
-  const claimed = updateTask(task.id, { status: "running" });
+  const claimed = claimProposedTask(task.id);
   if (!claimed) return task;
   void runTaskKickoffServerSide(claimed).catch((err) => {
     console.error("[start-task] kickoff failed:", err);

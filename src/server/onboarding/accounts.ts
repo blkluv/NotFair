@@ -130,12 +130,13 @@ export type SetAccountResult =
  *   1. Validates the account_id against the MCP's reachable list
  *      (anti-tamper for the form submit).
  *   2. Persists it on the project row.
- *   3. Mints the CMO's first task with the audit brief.
+ *   3. Mints the CMO's first task with the audit brief and immediately
+ *      claims+kicks it off server-side via startTaskIfProposed.
  *
- * The caller redirects to /agents/cmo/tasks?task=<display_id>; the
- * workspace's startTaskIfProposed fires the kickoff so the agent does the
- * audit live in the standard task UX. Replaces the one-off audit.ts
- * pipeline that used to drive its own SSE stream + FIRST_TURN.md sentinel.
+ * The caller redirects to /agents/cmo/tasks?task=<display_id> so the user
+ * watches the in-flight audit in the standard task UX. Replaces the one-off
+ * audit.ts pipeline that used to drive its own SSE stream + FIRST_TURN.md
+ * sentinel.
  */
 export async function setOnboardingAccountAction(
   project_slug: string,
@@ -194,6 +195,12 @@ export async function setOnboardingAccountAction(
       status: "proposed",
     });
   }
+
+  // Claim + kick off the audit task server-side. startTaskIfProposed uses an
+  // atomic conditional UPDATE so the resubmit branch (existing task) is a
+  // no-op when the audit is already running or done.
+  const { startTaskIfProposed } = await import("@/server/orchestration/run-task");
+  task = startTaskIfProposed(task);
 
   revalidatePath("/", "layout");
   return { ok: true, project: updated, task_display_id: task.display_id };

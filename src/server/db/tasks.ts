@@ -187,3 +187,24 @@ export function updateTask(id: string, update: UpdateTaskInput): Task | null {
 
   return getTask(id);
 }
+
+/**
+ * Atomically flip a task from `proposed` to `running` and return the post-flip
+ * row, or null when no claim happened (already started, already terminal, row
+ * missing). The conditional WHERE clause is the whole point — callers
+ * (kickoff entry points, "Start all" batch) can never accidentally regress a
+ * `succeeded`/`failed`/`cancelled` row back to `running` by passing in a
+ * stale in-memory task snapshot. better-sqlite3 is synchronous, so the
+ * read-back here cannot race with a concurrent writer in this process.
+ */
+export function claimProposedTask(id: string): Task | null {
+  const db = getDb();
+  const now = new Date().toISOString();
+  const info = db
+    .prepare(
+      "UPDATE tasks SET status = 'running', updated_at = ? WHERE id = ? AND status = 'proposed'",
+    )
+    .run(now, id);
+  if (info.changes === 0) return null;
+  return getTask(id);
+}

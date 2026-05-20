@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { getActiveProject } from "@/server/active-project";
-import { getTask, listTasksByAgent, updateTask } from "@/server/db/tasks";
+import { claimProposedTask, getTask, listTasksByAgent, updateTask } from "@/server/db/tasks";
 import { runTaskKickoffServerSide } from "@/server/orchestration/run-task";
 
 export type StartAllResult =
@@ -44,18 +44,19 @@ export async function startAllProposedTasksAction(
     };
   }
 
-  // Flip status to running BEFORE firing the kickoffs so the UI immediately
-  // reflects intent — the user sees "running" cards while the agent works.
-  for (const task of validTasks) {
-    updateTask(task.id, { status: "running" });
-  }
+  // Atomic claim per task — conditional UPDATE so a task that raced into
+  // running/terminal between the SELECT and now is silently skipped instead
+  // of getting its terminal status overwritten with `running`.
+  const claimedTasks = validTasks
+    .map((t) => claimProposedTask(t.id))
+    .filter((t): t is NonNullable<typeof t> => t !== null);
 
-  // Fire-and-forget per task. The server stays alive long enough to drain
-  // each gateway stream because Node keeps event-loop work running even
-  // after the action's response is sent. In production we'd want
+  // Fire-and-forget per claimed task. The server stays alive long enough to
+  // drain each gateway stream because Node keeps event-loop work running
+  // even after the action's response is sent. In production we'd want
   // `unstable_after` for stronger guarantees; V1 dev mode is fine.
-  for (const task of validTasks) {
-    void runTaskKickoffServerSide({ ...task, status: "running" }).catch((err) =>
+  for (const task of claimedTasks) {
+    void runTaskKickoffServerSide(task).catch((err) =>
       console.error(`[start-all] kickoff failed for ${task.id}:`, err),
     );
   }
@@ -64,7 +65,7 @@ export async function startAllProposedTasksAction(
   revalidatePath(`/tasks`, "layout");
   return {
     ok: true,
-    data: { started: validTasks.length, task_ids: validTasks.map((t) => t.id) },
+    data: { started: claimedTasks.length, task_ids: claimedTasks.map((t) => t.id) },
   };
 }
 
