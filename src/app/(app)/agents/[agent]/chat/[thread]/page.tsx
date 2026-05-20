@@ -1,3 +1,7 @@
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,6 +19,19 @@ import { AgentChat } from "@/components/agent-chat";
 import { GoogleAdsMcpBanner } from "@/components/google-ads-mcp-banner";
 import { McpFlashBanner } from "@/components/mcp-flash-banner";
 import { ThreadSelector } from "@/components/thread-selector";
+
+/**
+ * The onboarding audit module drops FIRST_TURN.md in the CMO's workspace so
+ * the agent can weave the audit into its opening greeting (per D19). But the
+ * chat client doesn't run the agent until the user types — so without this
+ * gate the user lands on a silent empty chat. Detect server-side: when the
+ * thread has no history AND FIRST_TURN.md exists, signal the client to
+ * auto-send a hidden kickoff so the agent produces its opener.
+ */
+function firstTurnPendingForAgent(agentId: string): boolean {
+  const dataDir = process.env.NOTFAIR_CMO_DATA_DIR ?? join(homedir(), ".notfair-cmo");
+  return existsSync(join(dataDir, "agents", agentId, "FIRST_TURN.md"));
+}
 
 type Params = { agent: string; thread: string };
 type Search = { mcp_connected?: string; mcp_error?: string };
@@ -89,6 +106,12 @@ export default async function AgentChatThreadPage({
       ? await getMcpStatus(storedMcpKey(project.slug, "notfair-googleads"))
       : null;
 
+  // Auto-kickoff: only on a brand-new thread for an agent with a FIRST_TURN.md
+  // sentinel (dropped by the onboarding audit). The agent's system prompt
+  // tells it to read the file + move it to MEMORY/ after, so subsequent
+  // sessions won't re-fire even though we keep the simple history-empty check.
+  const autoKickoff = history.length === 0 && firstTurnPendingForAgent(agentFullId);
+
   return (
     <div className="flex h-full flex-col">
       <McpFlashBanner connected={mcp_connected} error={mcp_error} />
@@ -120,6 +143,7 @@ export default async function AgentChatThreadPage({
           sessionKey={sessionKey}
           templateKey={resolved.template_key}
           initialMessages={history.map((m) => ({ id: m.id, role: m.role, body: m.body }))}
+          autoKickoff={autoKickoff}
         />
       </div>
     </div>

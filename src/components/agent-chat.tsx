@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   Send,
@@ -72,6 +72,13 @@ type Props = {
    */
   templateKey?: string;
   initialMessages?: InitialMessage[];
+  /**
+   * When true, the chat auto-sends a hidden kickoff on mount so the agent
+   * produces its first turn without the user needing to type. Used after
+   * onboarding when FIRST_TURN.md is sitting in the agent workspace and
+   * the agent system prompt is set up to read it and greet (D19).
+   */
+  autoKickoff?: boolean;
 };
 
 export function AgentChat({
@@ -82,6 +89,7 @@ export function AgentChat({
   sessionKey,
   templateKey: _templateKey,
   initialMessages = [],
+  autoKickoff = false,
 }: Props) {
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [input, setInput] = useState("");
@@ -124,6 +132,25 @@ export function AgentChat({
     });
   }
 
+  // Auto-kickoff: on a brand-new thread when the server told us FIRST_TURN.md
+  // is pending in the agent workspace, send a hidden first message so the
+  // agent runs and produces its greeting (per D19). Fire exactly once per
+  // mount; once messages.length is non-zero (any path) we never re-fire.
+  const kickoffFiredRef = useRef(false);
+  useEffect(() => {
+    if (!autoKickoff) return;
+    if (kickoffFiredRef.current) return;
+    if (messages.length > 0) return;
+    if (pending) return;
+    kickoffFiredRef.current = true;
+    // Short, neutral kickoff — the agent's FIRST_TURN.md instruction does the
+    // rest. Hidden so the user sees the greeting land on a clean canvas.
+    send("(session start)", { hidden: true });
+    // Intentionally do not depend on `send` (stable enough across renders) or
+    // `messages` (would re-fire as the greeting streams in).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoKickoff]);
+
   // Keep the message thread pinned to the bottom on send / streaming updates.
   // Use the scroll container directly (not scrollIntoView on a sentinel) so we
   // don't accidentally scroll the whole page if the chat is nested.
@@ -140,10 +167,17 @@ export function AgentChat({
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
   }
 
-  async function send(overrideText?: string) {
+  async function send(
+    overrideText?: string,
+    opts: { hidden?: boolean } = {},
+  ) {
     // overrideText: bypass the composer and send a programmatic message
-    // (e.g., the MCP connect kickoff). When provided, we do NOT touch the
-    // input/textarea state so the user's draft is preserved.
+    // (e.g., the MCP connect kickoff, or the FIRST_TURN.md auto-kickoff).
+    // When provided, we do NOT touch the input/textarea state so the user's
+    // draft is preserved.
+    // opts.hidden: don't render the user bubble in the chat — used for the
+    // FIRST_TURN.md kickoff where the user shouldn't see "Hi" land before
+    // the agent's greeting.
     const usingOverride = typeof overrideText === "string";
     const text = (usingOverride ? overrideText : input).trim();
     if (!text || pending) return;
@@ -188,7 +222,14 @@ export function AgentChat({
 
     const userMessage: Message = { id: `u-${Date.now()}`, role: "user", body: text };
     const assistantId = `a-${Date.now()}`;
-    setMessages((m) => [...m, userMessage, { id: assistantId, role: "assistant", body: "" }]);
+    if (opts.hidden) {
+      // Send the user message to the agent but suppress the bubble — only
+      // the assistant placeholder appears, so the chat opens with the
+      // greeting and not a synthetic user line.
+      setMessages((m) => [...m, { id: assistantId, role: "assistant", body: "" }]);
+    } else {
+      setMessages((m) => [...m, userMessage, { id: assistantId, role: "assistant", body: "" }]);
+    }
     if (!usingOverride) {
       setInput("");
       if (textareaRef.current) {
