@@ -7,6 +7,7 @@ import {
   buildPendingSessionKey,
   findSessionBySessionId,
 } from "@/server/openclaw/sessions";
+import { claimProposedTask, getTask } from "@/server/db/tasks";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -58,6 +59,14 @@ type ChatPostBody = {
    * sessionId-derived key for brand-new threads.
    */
   sessionKey?: string;
+  /**
+   * When set, this turn is a task kickoff: atomically claim the task
+   * (proposed → working) before forwarding to the gateway. The claim is
+   * conditional on status='proposed', so concurrent kickoffs or reloads
+   * mid-run are rejected with 409 instead of double-firing the agent.
+   * Absent for normal user-typed messages.
+   */
+  task_id?: string;
 };
 
 export async function POST(request: Request) {
@@ -116,6 +125,43 @@ export async function POST(request: Request) {
     sessionKey = known?.sessionKey ?? buildPendingSessionKey(agentName, sessionId);
   }
   perf.mark("session_resolved");
+
+  // Task-kickoff path: claim the proposed task before streaming so a single
+  // turn can't fire twice (page reload / two tabs / StrictMode double-mount).
+  // claimProposedTask is a conditional UPDATE keyed on status='proposed';
+  // any other state (working/done/failed/cancelled) returns null and we
+  // reject with 409. Callers (LiveTranscript auto-kickoff) treat 409 as a
+  // benign no-op — the task is already running or finished elsewhere.
+  const taskId = body.task_id?.trim();
+  if (taskId) {
+    const existing = getTask(taskId);
+    if (!existing) {
+      return NextResponse.json(
+        { error: `Unknown task_id '${taskId}'` },
+        { status: 404 },
+      );
+    }
+    if (existing.agent_id !== agentName) {
+      return NextResponse.json(
+        {
+          error: `Task ${existing.display_id} belongs to ${existing.agent_id}, not ${agentName}`,
+        },
+        { status: 400 },
+      );
+    }
+    const claimed = claimProposedTask(existing.id);
+    if (!claimed) {
+      return NextResponse.json(
+        {
+          error: "task already claimed",
+          status: existing.status,
+          task_id: existing.id,
+        },
+        { status: 409 },
+      );
+    }
+  }
+  perf.mark("task_claim_resolved");
 
   const encoder = new TextEncoder();
 

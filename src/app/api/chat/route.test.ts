@@ -33,6 +33,13 @@ vi.mock("@/server/openclaw/gateway-client", () => ({
   streamChatViaGateway: (...args: unknown[]) => streamChatViaGatewayMock(...args),
 }));
 
+const getTaskMock = vi.fn();
+const claimProposedTaskMock = vi.fn();
+vi.mock("@/server/db/tasks", () => ({
+  getTask: (...args: unknown[]) => getTaskMock(...args),
+  claimProposedTask: (...args: unknown[]) => claimProposedTaskMock(...args),
+}));
+
 import { POST } from "./route";
 
 function makeProject(overrides: Partial<Project> = {}): Project {
@@ -382,6 +389,107 @@ describe("POST /api/chat", () => {
   // turn is streaming. The chat route is now pure pipe + perf instrumentation,
   // so the only thing left to assert is that no `orchestration` SSE event is
   // ever emitted (it's no longer part of the protocol).
+  // ── task_id: kickoff path ────────────────────────────────────────────
+  describe("task_id (task kickoff)", () => {
+    function setupAgent(slug = "acme", agentId = "acme-cmo") {
+      getActiveProjectMock.mockResolvedValue(makeProject({ slug }));
+      resolveAgentBySlugMock.mockResolvedValue({
+        agent_id: agentId,
+        display_name: "CMO",
+        slug: "cmo",
+      });
+      findSessionBySessionIdMock.mockReturnValue(null);
+    }
+
+    it("claims a proposed task and proceeds to stream when task_id matches", async () => {
+      setupAgent();
+      getTaskMock.mockReturnValueOnce({
+        id: "task-uuid",
+        display_id: "acme-1",
+        agent_id: "acme-cmo",
+        status: "proposed",
+      });
+      claimProposedTaskMock.mockReturnValueOnce({
+        id: "task-uuid",
+        status: "working",
+      });
+      streamChatViaGatewayMock.mockReturnValueOnce(makeAgentStream([]));
+
+      const res = await POST(
+        makeReq({
+          message: "(task assignment)",
+          sessionId: "s1",
+          task_id: "task-uuid",
+        }),
+      );
+      expect(res.status).toBe(200);
+      await readSse(res);
+      expect(claimProposedTaskMock).toHaveBeenCalledWith("task-uuid");
+      expect(streamChatViaGatewayMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("returns 409 when the task can't be claimed (already running/terminal)", async () => {
+      setupAgent();
+      getTaskMock.mockReturnValueOnce({
+        id: "task-uuid",
+        display_id: "acme-1",
+        agent_id: "acme-cmo",
+        status: "working",
+      });
+      claimProposedTaskMock.mockReturnValueOnce(null);
+
+      const res = await POST(
+        makeReq({ message: "hi", sessionId: "s1", task_id: "task-uuid" }),
+      );
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as { status: string };
+      expect(body.status).toBe("working");
+      // Should NOT stream when claim failed — otherwise we'd double-fire the
+      // agent on a reload / concurrent tab.
+      expect(streamChatViaGatewayMock).not.toHaveBeenCalled();
+    });
+
+    it("returns 404 when the task_id doesn't exist", async () => {
+      setupAgent();
+      getTaskMock.mockReturnValueOnce(null);
+      const res = await POST(
+        makeReq({ message: "hi", sessionId: "s1", task_id: "bogus" }),
+      );
+      expect(res.status).toBe(404);
+      expect(claimProposedTaskMock).not.toHaveBeenCalled();
+    });
+
+    it("returns 400 when task belongs to a different agent", async () => {
+      setupAgent("acme", "acme-cmo");
+      getTaskMock.mockReturnValueOnce({
+        id: "task-uuid",
+        display_id: "acme-1",
+        agent_id: "acme-google-ads",
+        status: "proposed",
+      });
+      const res = await POST(
+        makeReq({
+          message: "hi",
+          sessionId: "s1",
+          agent: "cmo",
+          task_id: "task-uuid",
+        }),
+      );
+      expect(res.status).toBe(400);
+      expect(claimProposedTaskMock).not.toHaveBeenCalled();
+    });
+
+    it("skips claim entirely when no task_id is provided (normal chat)", async () => {
+      setupAgent();
+      streamChatViaGatewayMock.mockReturnValueOnce(makeAgentStream([]));
+      const res = await POST(makeReq({ message: "hi", sessionId: "s1" }));
+      expect(res.status).toBe(200);
+      await readSse(res);
+      expect(getTaskMock).not.toHaveBeenCalled();
+      expect(claimProposedTaskMock).not.toHaveBeenCalled();
+    });
+  });
+
   it("never emits an `orchestration` SSE event (MCP-based now)", async () => {
     getActiveProjectMock.mockResolvedValueOnce(makeProject({ slug: "acme" }));
     resolveAgentBySlugMock.mockResolvedValueOnce({

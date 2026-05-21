@@ -59,6 +59,12 @@ type SelectedTaskBundle = {
   /** Approvals attached to this task, newest first. Rendered above the
    *  transcript so the user can act on a pending one without leaving the chat. */
   approvals: Approval[];
+  /**
+   * Set when this task is still in `proposed` and the workspace should
+   * auto-fire the kickoff via /api/chat on mount. Null once the task has
+   * been claimed (working / done / etc.) so a reload doesn't re-send.
+   */
+  kickoff: { taskId: string; message: string } | null;
 };
 
 type Props = {
@@ -346,6 +352,9 @@ function SelectedTaskPanel({
           composerDisabled={isInFlight}
           blockedReason={blockedReason}
           onPolled={onPolled}
+          autoKickoff={selected.kickoff !== null}
+          kickoffMessage={selected.kickoff?.message}
+          taskId={selected.kickoff?.taskId}
         />
       </div>
     </div>

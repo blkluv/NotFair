@@ -52,14 +52,6 @@ vi.mock("@/server/agent-templates", () => ({
   agentNameFor: (slug: string, key: string) => `${slug}-${key.replace(/_/g, "-")}`,
 }));
 
-// setOnboardingAccountAction lazy-imports startTaskIfProposed to kick off the
-// audit task at creation time. Stub it as a pass-through — the real kickoff
-// path would spin up the gateway client, which has no place in this test.
-const startTaskIfProposedMock = vi.fn((task: unknown) => task);
-vi.mock("@/server/orchestration/run-task", () => ({
-  startTaskIfProposed: (task: unknown) => startTaskIfProposedMock(task),
-}));
-
 import {
   listGoogleAdsAccounts,
   setOnboardingAccountAction,

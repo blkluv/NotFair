@@ -10,7 +10,10 @@ import {
   readTranscriptTail,
   type TranscriptEvent,
 } from "@/server/openclaw/transcript-tail";
-import { generateTaskThreadId } from "@/server/orchestration/task-kickoff";
+import {
+  buildTaskKickoffMessage,
+  generateTaskThreadId,
+} from "@/server/orchestration/task-kickoff";
 import type { Approval, Task } from "@/types";
 
 type Props = {
@@ -31,6 +34,14 @@ type SelectedBundle = {
    * the audit trail for "what did I approve here?".
    */
   approvals: Approval[];
+  /**
+   * Auto-kickoff payload for tasks that haven't started yet. The page
+   * builds the full assignment brief server-side so the client can just
+   * hand it to /api/chat — no business logic on the browser. `null` for
+   * any task already past `proposed` (kickoff already happened or never
+   * will).
+   */
+  kickoff: { taskId: string; message: string } | null;
 };
 
 export default async function AgentTasksPage({ params, searchParams }: Props) {
@@ -46,9 +57,12 @@ export default async function AgentTasksPage({ params, searchParams }: Props) {
   const agentFullId = resolved.agent_id;
 
   // Load the selected task's brief + transcript bundle if `?task=` is set.
-  // Tasks are kicked off at creation time (onboarding action + the CMO's
-  // <create_task> handler both call startTaskIfProposed), so this path is
-  // read-only — it never mutates task status.
+  // For tasks still in `proposed`, we hand the client a kickoff payload it
+  // fires through /api/chat on mount — the SSE path streams gateway events
+  // live (JSONL polling alone misses the run because OpenClaw's codex
+  // mode flushes the transcript once per turn). For tasks already past
+  // proposed (delegated via MCP, restarted via Start all, or finished),
+  // this path is read-only.
   let selected: SelectedBundle | null = null;
   if (selectedTaskId) {
     selected = await loadSelectedBundle(agentFullId, selectedTaskId);
@@ -97,6 +111,15 @@ async function loadSelectedBundle(
   const { events, byteOffset } = readTranscriptTail(agentFullId, threadId, 0);
   const approvals = listApprovalsForTask(task.id);
 
+  // Only minted for `proposed` tasks. The client uses this to fire the
+  // first turn via /api/chat (which streams gateway events live), and
+  // /api/chat atomically claims the task on the server before forwarding
+  // — so reloads / concurrent tabs can't double-fire the agent.
+  const kickoff =
+    task.status === "proposed"
+      ? { taskId: task.id, message: buildTaskKickoffMessage(task) }
+      : null;
+
   return {
     task,
     threadId,
@@ -104,5 +127,6 @@ async function loadSelectedBundle(
     initialEvents: events,
     initialByteOffset: byteOffset,
     approvals,
+    kickoff,
   };
 }

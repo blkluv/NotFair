@@ -636,6 +636,64 @@ describe("LiveTranscript autoKickoff", () => {
     expect(screen.queryByText("kickoff!")).not.toBeInTheDocument();
   });
 
+  it("forwards taskId in the /api/chat body when autoKickoff fires", async () => {
+    let observedBody: Record<string, unknown> | null = null;
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode("event: text\ndata: {\"chunk\":\"hi\"}\n\n"));
+        controller.close();
+      },
+    });
+    setFetch(async (url, init) => {
+      if (String(url).includes("/api/chat")) {
+        observedBody = JSON.parse((init?.body as string) ?? "{}");
+        return new Response(stream, { status: 200 });
+      }
+      return makeEmptyTranscriptResponse();
+    });
+    render(
+      <LiveTranscript
+        {...defaultProps({
+          autoKickoff: true,
+          kickoffMessage: "kickoff body",
+          taskId: "task-uuid-7",
+          threadId: "t-kickoff-with-task-id",
+        })}
+      />,
+    );
+    await waitFor(() => expect(observedBody).not.toBeNull());
+    expect(observedBody!.task_id).toBe("task-uuid-7");
+  });
+
+  it("treats a 409 from /api/chat as a benign no-op (no error toast, no thrown error)", async () => {
+    setFetch(async (url) => {
+      if (String(url).includes("/api/chat")) {
+        return new Response(
+          JSON.stringify({ error: "task already claimed", status: "working" }),
+          { status: 409 },
+        );
+      }
+      return makeEmptyTranscriptResponse();
+    });
+    render(
+      <LiveTranscript
+        {...defaultProps({
+          autoKickoff: true,
+          kickoffMessage: "kickoff body",
+          taskId: "task-uuid-8",
+          threadId: "t-kickoff-409",
+        })}
+      />,
+    );
+    // No error row should appear — 409 means "someone else claimed it"
+    // and is expected during reloads / concurrent tabs.
+    await new Promise((r) => setTimeout(r, 30));
+    expect(
+      screen.queryByText(/couldn[’']t reach/i),
+    ).not.toBeInTheDocument();
+  });
+
   it("does not auto-kickoff a second time for the same threadId (module guard)", async () => {
     // Re-uses the same threadId as the previous test which already added to KICKOFF_FIRED.
     let chatCalled = false;

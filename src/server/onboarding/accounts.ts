@@ -130,13 +130,14 @@ export type SetAccountResult =
  *   1. Validates the account_id against the MCP's reachable list
  *      (anti-tamper for the form submit).
  *   2. Persists it on the project row.
- *   3. Mints the CMO's first task with the audit brief and immediately
- *      claims+kicks it off server-side via startTaskIfProposed.
+ *   3. Mints the CMO's first task with the audit brief in `proposed`
+ *      state. The task workspace the user lands on auto-fires the
+ *      kickoff via /api/chat, so the user sees streaming gateway events
+ *      live — JSONL polling alone can't (OpenClaw's codex-app-server
+ *      mode flushes the file once per turn, not incrementally).
  *
  * The caller redirects to /agents/cmo/tasks?task=<display_id> so the user
- * watches the in-flight audit in the standard task UX. Replaces the one-off
- * audit.ts pipeline that used to drive its own SSE stream + FIRST_TURN.md
- * sentinel.
+ * watches the live audit stream the moment the page mounts.
  */
 export async function setOnboardingAccountAction(
   project_slug: string,
@@ -196,11 +197,11 @@ export async function setOnboardingAccountAction(
     });
   }
 
-  // Claim + kick off the audit task server-side. startTaskIfProposed uses an
-  // atomic conditional UPDATE so the resubmit branch (existing task) is a
-  // no-op when the audit is already running or done.
-  const { startTaskIfProposed } = await import("@/server/orchestration/run-task");
-  task = startTaskIfProposed(task);
+  // Leave the task in `proposed`. The task workspace the caller redirects
+  // the user to will auto-fire the kickoff client-side via /api/chat so
+  // the user sees live gateway events stream in. /api/chat atomically
+  // claims the task before sending, so the resubmit branch (existing task
+  // already running/done) is a safe no-op there.
 
   revalidatePath("/", "layout");
   return { ok: true, project: updated, task_display_id: task.display_id };

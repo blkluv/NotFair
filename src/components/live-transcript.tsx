@@ -73,12 +73,22 @@ type Props = {
   /**
    * Auto-kickoff: when true AND the transcript is empty AND we're not
    * already sending, fire a hidden first message so the agent runs
-   * without the user typing. Used by /chat after onboarding (the
-   * FIRST_TURN.md sentinel) so the CMO greets without a manual nudge.
+   * without the user typing. Used by the task workspace for tasks still
+   * in `proposed` so the user sees gateway events stream in immediately
+   * — JSONL polling alone can't (OpenClaw's codex-app-server mode flushes
+   * the file once per turn, not incrementally).
    */
   autoKickoff?: boolean;
   /** Override for the auto-kickoff message body. */
   kickoffMessage?: string;
+  /**
+   * Task this turn belongs to. Forwarded to /api/chat so the server can
+   * atomically claim the task (proposed → working) before forwarding to
+   * the gateway. Without it, two tabs / a fast reload could race two
+   * kickoffs against each other and double-fire the agent. The server
+   * returns 409 when the claim fails; we treat that as a benign no-op.
+   */
+  taskId?: string;
 };
 
 /** Module-level guard so React StrictMode dev double-mounts don't double-fire. */
@@ -97,6 +107,7 @@ export function LiveTranscript({
   onPolled,
   autoKickoff = false,
   kickoffMessage,
+  taskId,
 }: Props) {
   const router = useRouter();
   const [events, setEvents] = useState<TranscriptEvent[]>(initialEvents);
@@ -302,6 +313,11 @@ export function LiveTranscript({
       const ctrl = new AbortController();
       abortRef.current = ctrl;
 
+      // Auto-kickoffs forward task_id so the server can atomically claim
+      // the task (proposed → working). User-typed messages skip it — the
+      // composer is already disabled while the task is in flight, so any
+      // message the user can actually send is post-claim.
+      const includeTaskId = opts.hidden && taskId;
       try {
         const res = await fetch("/api/chat", {
           method: "POST",
@@ -312,9 +328,17 @@ export function LiveTranscript({
             project: projectSlug,
             sessionId: threadId,
             sessionKey,
+            ...(includeTaskId ? { task_id: taskId } : {}),
           }),
           signal: ctrl.signal,
         });
+        if (res.status === 409) {
+          // Task was already claimed elsewhere (concurrent tab, reload
+          // during a working turn). The agent is running on OpenClaw —
+          // JSONL polling will surface the output once the turn flushes.
+          // Bail silently; this is not a user-facing error.
+          return;
+        }
         if (!res.ok || !res.body) {
           throw new Error((await res.text()) || `HTTP ${res.status}`);
         }
@@ -366,7 +390,7 @@ export function LiveTranscript({
         abortRef.current = null;
       }
     },
-    [agentSlug, input, pollOnce, projectSlug, router, sendingChat, sessionKey, threadId],
+    [agentSlug, input, pollOnce, projectSlug, router, sendingChat, sessionKey, taskId, threadId],
   );
 
   // ── Auto-kickoff for FIRST_TURN-style flows. ────────────────────────
