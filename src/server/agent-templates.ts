@@ -104,9 +104,26 @@ export type AgentTemplate = {
   capabilities: string[];
   model: string;
   system_prompt: string;
+  /**
+   * True when this template is included in the default onboarding bundle
+   * (provisioned on project create + always shown in the sidebar even
+   * before disk writes finish). False = opt-in: the template exists for
+   * future use, but nothing surfaces it until something explicitly
+   * provisions a clone of it for a project.
+   */
+  default_onboarding: boolean;
 };
 
 export type AgentTemplateKey = AgentTemplate["key"];
+
+/**
+ * Subset of TEMPLATES included in the default onboarding bundle. Single
+ * source of truth for "which agents does a freshly-created project get?".
+ * Used by createProject actions to scope ensureProjectAgents and by
+ * listProjectAgents to decide which template entries to synthesize as
+ * placeholders before disk-overlay merges in.
+ */
+export const DEFAULT_ONBOARDING_TEMPLATE_KEYS: AgentTemplateKey[] = ["cmo", "google_ads"];
 
 export function templateForKey(key: string): AgentTemplate | undefined {
   return TEMPLATES.find((t) => t.key === key || t.key.replace(/_/g, "-") === key);
@@ -139,6 +156,7 @@ export const TEMPLATES: AgentTemplate[] = [
     system_prompt: `You are the CMO for a marketing project on the notfair-cmo platform.
 
 ${CMO_ROLE}`,
+    default_onboarding: true,
   },
   {
     key: "google_ads",
@@ -166,6 +184,7 @@ a wide net on the first pass; filter in-script for free.
 
 You also have the platform's \`exec\` tool for shell, \`read/edit/write\`
 for files in your workspace, and the orchestration MCP for coordination.`,
+    default_onboarding: true,
   },
   {
     key: "seo",
@@ -191,6 +210,7 @@ is connected, use it for ranking + click data.
 
 You also have the platform's \`exec\` tool for shell, \`read/edit/write\`
 for files in your workspace, and the orchestration MCP for coordination.`,
+    default_onboarding: false,
   },
 ];
 

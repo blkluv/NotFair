@@ -75,16 +75,20 @@ vi.mock("./agent-templates", () => ({
       key: "cmo",
       display_name: "CMO",
       description: "Chief Marketing Officer.",
+      default_onboarding: true,
     },
     {
       key: "google_ads",
       display_name: "Google Ads",
       description: "Google Ads specialist.",
+      default_onboarding: true,
     },
     {
       key: "seo",
       display_name: "SEO",
       description: "SEO specialist.",
+      // Opt-in template: not pre-seeded, only appears via meta sidecar.
+      default_onboarding: false,
     },
   ],
   agentNameFor: (slug: string, key: string) =>
@@ -186,26 +190,43 @@ describe("writeAgentMeta + readAgentMeta", () => {
 });
 
 describe("listProjectAgents", () => {
-  it("returns templates-only when agents dir is missing", async () => {
+  it("returns the onboarding-default templates only when agents dir is missing", async () => {
     fsState.missingDirs.add("/data/agents");
     const r = await listProjectAgents("acme");
-    expect(r).toHaveLength(3);
+    // SEO is template_key: 'seo' with default_onboarding: false — it should
+    // NOT appear until something explicitly provisions it for the project.
+    expect(r).toHaveLength(2);
     expect(r.map((e) => e.agent_id)).toEqual([
       "acme-cmo",
       "acme-google-ads",
-      "acme-seo",
     ]);
     expect(r.every((e) => e.is_template_default)).toBe(true);
   });
 
-  it("returns templates-only when agents dir exists but has no entries for the project", async () => {
+  it("returns onboarding-default templates only when agents dir exists but has no entries for the project", async () => {
     // Empty dir: readdir resolves to [], no entries match.
     const r = await listProjectAgents("acme");
     expect(r.map((e) => e.agent_id)).toEqual([
       "acme-cmo",
       "acme-google-ads",
-      "acme-seo",
     ]);
+  });
+
+  it("includes an opt-in template (e.g. SEO) once a meta sidecar is written for it", async () => {
+    await writeAgentMeta(
+      makeMeta({
+        agent_id: "acme-seo",
+        slug: "seo",
+        display_name: "SEO",
+        template_key: "seo",
+      }),
+    );
+    const r = await listProjectAgents("acme");
+    const seo = r.find((e) => e.agent_id === "acme-seo");
+    expect(seo).toBeDefined();
+    expect(seo?.template_key).toBe("seo");
+    // It now appears as a non-template-default entry (overlay row wins).
+    expect(seo?.is_template_default).toBe(false);
   });
 
   it("overlays a meta sidecar so is_template_default flips to false", async () => {
@@ -255,11 +276,11 @@ describe("listProjectAgents", () => {
       }),
     );
     const r = await listProjectAgents("acme");
-    // Templates first in declared order, then custom alphabetically by slug.
+    // Onboarding-default templates first in declared order (SEO is opt-in
+    // and not seeded), then custom alphabetically by slug.
     expect(r.map((e) => e.slug)).toEqual([
       "cmo",
       "google-ads",
-      "seo",
       "a-tool",
       "z-tool",
     ]);
@@ -276,8 +297,8 @@ describe("listProjectAgents", () => {
     );
     const r = await listProjectAgents("acme");
     expect(r.find((e) => e.agent_id === "globex-cmo")).toBeUndefined();
-    // Still has the 3 templates for acme.
-    expect(r.filter((e) => e.is_template_default)).toHaveLength(3);
+    // Still has the onboarding-default templates for acme.
+    expect(r.filter((e) => e.is_template_default)).toHaveLength(2);
   });
 
   it("skips entries with a matching prefix but no meta sidecar", async () => {
@@ -285,9 +306,9 @@ describe("listProjectAgents", () => {
     // OpenClaw workspace dir without the sidecar (e.g., pre-sidecar agents).
     fsState.dirs.add("/data/agents/acme-orphan");
     const r = await listProjectAgents("acme");
-    // Should not include acme-orphan; just the templates.
+    // Should not include acme-orphan; just the onboarding-default templates.
     expect(r.find((e) => e.agent_id === "acme-orphan")).toBeUndefined();
-    expect(r).toHaveLength(3);
+    expect(r).toHaveLength(2);
   });
 });
 

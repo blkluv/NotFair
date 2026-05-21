@@ -76,8 +76,13 @@ export type ProjectAgentEntry = {
 export async function listProjectAgents(project_slug: string): Promise<ProjectAgentEntry[]> {
   const result = new Map<string, ProjectAgentEntry>();
 
-  // 1) Seed with templates (they may or may not exist on disk yet).
+  // 1) Seed with the templates an onboarded project actually has. Opt-in
+  //    templates (e.g. SEO until v1.1 lights it up) live in TEMPLATES but
+  //    are NOT pre-seeded — they only appear when a meta sidecar shows
+  //    one was actually provisioned. This is how we keep the sidebar from
+  //    pretending SEO exists when the onboarding scope is cmo+google-ads.
   for (const t of TEMPLATES) {
+    if (!t.default_onboarding) continue;
     const agentId = agentNameFor(project_slug, t.key);
     result.set(agentId, {
       agent_id: agentId,

@@ -16,7 +16,10 @@ import {
   clearActiveProject,
   setActiveProject,
 } from "@/server/active-project";
-import { ensureProjectAgents } from "@/server/agent-templates";
+import {
+  DEFAULT_ONBOARDING_TEMPLATE_KEYS,
+  ensureProjectAgents,
+} from "@/server/agent-templates";
 import { startProvisioning } from "@/server/onboarding/provisioning-state";
 import { listProjectAgents, readAgentMeta } from "@/server/agent-meta";
 import { cascadeDeleteAgent, relocateAgent } from "@/server/actions/agents";
@@ -47,11 +50,14 @@ export async function createProjectAction(formData: FormData): Promise<void> {
   // Per D6: provision CMO + Google Ads asynchronously so the form returns
   // immediately. The audit step (after OAuth) gates on completion via
   // `awaitProvisioning` from server/onboarding/provisioning-state.
-  // Per D4: scope to CMO + Google Ads only; SEO is opt-in later.
-  const provisionPromise = ensureProjectAgents(result.project.slug, [
-    "cmo",
-    "google_ads",
-  ]);
+  // Per D4: scope to the default onboarding bundle (SEO is opt-in later).
+  // DEFAULT_ONBOARDING_TEMPLATE_KEYS is the single source of truth — also
+  // consulted by listProjectAgents to decide which template placeholders
+  // appear in the sidebar before disk writes finish.
+  const provisionPromise = ensureProjectAgents(
+    result.project.slug,
+    DEFAULT_ONBOARDING_TEMPLATE_KEYS,
+  );
   startProvisioning(result.project.slug, provisionPromise);
   // Log on completion (best-effort, doesn't block form return).
   provisionPromise
@@ -96,10 +102,10 @@ export async function createProjectForOnboardingAction(
   if (!result.ok) return { ok: false, error: result.reason };
 
   // Same async-provisioning policy as createProjectAction (D4 + D6).
-  const provisionPromise = ensureProjectAgents(result.project.slug, [
-    "cmo",
-    "google_ads",
-  ]);
+  const provisionPromise = ensureProjectAgents(
+    result.project.slug,
+    DEFAULT_ONBOARDING_TEMPLATE_KEYS,
+  );
   startProvisioning(result.project.slug, provisionPromise);
   // After provisioning resolves, mint + start the CMO's project-onboarding
   // task. We chain off provisionPromise (not Promise.all) so a failed
@@ -170,7 +176,13 @@ export async function createProjectForOnboardingAction(
 
 export async function reprovisionAgentsAction(slug: string): Promise<{ ok: true; created: string[]; existed: string[] } | { ok: false; error: string }> {
   try {
-    const result = await ensureProjectAgents(slug);
+    // Scope to the same set onboarding uses — clicking "Reprovision" should
+    // restore the onboarded bundle (cmo + google-ads), not auto-create
+    // opt-in templates like SEO that the user never asked for.
+    const { DEFAULT_ONBOARDING_TEMPLATE_KEYS } = await import(
+      "@/server/agent-templates"
+    );
+    const result = await ensureProjectAgents(slug, DEFAULT_ONBOARDING_TEMPLATE_KEYS);
     revalidatePath("/", "layout");
     return { ok: true, ...result };
   } catch (err) {

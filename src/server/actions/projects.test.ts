@@ -49,6 +49,10 @@ vi.mock("@/server/active-project", () => ({
 const ensureProjectAgentsMock = vi.fn();
 vi.mock("@/server/agent-templates", () => ({
   ensureProjectAgents: (...args: unknown[]) => ensureProjectAgentsMock(...args),
+  // The onboarding scope constant. createProjectAction +
+  // createProjectForOnboardingAction read it from agent-templates; the
+  // reprovisionAgentsAction also passes it explicitly.
+  DEFAULT_ONBOARDING_TEMPLATE_KEYS: ["cmo", "google_ads"],
 }));
 
 const startProvisioningMock = vi.fn();
