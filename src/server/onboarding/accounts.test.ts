@@ -50,6 +50,17 @@ vi.mock("@/server/db/tasks", () => ({
 }));
 vi.mock("@/server/agent-templates", () => ({
   agentNameFor: (slug: string, key: string) => `${slug}-${key.replace(/_/g, "-")}`,
+  agentUrlSlug: (key: string, name: string) =>
+    `${key.replace(/_/g, "-")}-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+  TEMPLATES: [
+    { key: "cmo", default_name: "Greg" },
+    { key: "google_ads", default_name: "Ana" },
+    { key: "seo", default_name: "Sam" },
+  ],
+}));
+
+vi.mock("@/server/agent-meta", () => ({
+  readAgentMeta: () => null,
 }));
 
 import {

@@ -10,13 +10,19 @@ import {
 } from "@/components/ui/sidebar";
 import { RunningDot } from "@/components/running-dot";
 import type { AgentTemplateKey } from "@/server/agent-templates";
+import { colorForRole } from "@/lib/agent-colors";
+import { cn } from "@/lib/utils";
 import { projectHref } from "@/lib/project-href";
 
 type AgentNavEntry = {
   /** Stable key for React, e.g. the agent_id. */
   key: string;
   slug: string;
-  display_name: string;
+  /** Personal name shown as the primary sidebar label (e.g. "Greg"). */
+  name: string;
+  /** Role label for the pill next to the name (e.g. "CMO"). Undefined for
+   *  cloned/custom agents that aren't backed by a template. */
+  role_label?: string;
   description?: string;
   /** Filled for template agents; undefined for cloned/custom ones. */
   template_key?: AgentTemplateKey;
@@ -55,12 +61,23 @@ export function AgentNav({ projectSlug, agents, inFlightCounts = {} }: Props) {
           pathname === agentBase || pathname?.startsWith(`${agentBase}/`);
         const Icon = a.template_key ? TEMPLATE_ICONS[a.template_key] ?? Bot : Bot;
         const liveCount = inFlightCounts[a.key] ?? 0;
+        const rolePalette = a.template_key ? colorForRole(a.template_key) : null;
         return (
           <SidebarMenuItem key={a.key}>
             <SidebarMenuButton asChild isActive={isActive}>
               <Link href={href}>
                 <Icon />
-                <span>{a.display_name}</span>
+                <span className="truncate">{a.name}</span>
+                {a.role_label && rolePalette && (
+                  <span
+                    className={cn(
+                      "ml-1 rounded-sm border px-1 py-px text-[9px] font-medium uppercase tracking-wider leading-none",
+                      rolePalette.chip,
+                    )}
+                  >
+                    {a.role_label}
+                  </span>
+                )}
                 {liveCount > 0 && (
                   <span className="ml-auto inline-flex items-center gap-1.5">
                     <RunningDot size="sm" aria-label={`${liveCount} running`} />

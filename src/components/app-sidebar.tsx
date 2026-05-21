@@ -27,6 +27,7 @@ import { listProjects } from "@/server/db/projects";
 import { getActiveProject } from "@/server/active-project";
 import { actionableApprovalCount } from "@/server/db/approvals";
 import { listProjectAgents } from "@/server/agent-meta";
+import { TEMPLATES } from "@/server/agent-templates";
 import { inFlightCountsByAgent } from "@/server/db/tasks";
 import { projectHref } from "@/lib/project-href";
 import { ProjectSwitcher } from "./project-switcher";
@@ -105,7 +106,10 @@ export async function AppSidebar() {
                 agents={agentEntries.map((a) => ({
                   key: a.agent_id,
                   slug: a.slug,
-                  display_name: a.display_name,
+                  name: a.name,
+                  role_label: a.template_key
+                    ? TEMPLATES.find((t) => t.key === a.template_key)?.display_name
+                    : undefined,
                   description: a.description,
                   template_key: a.template_key,
                 }))}

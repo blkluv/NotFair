@@ -91,14 +91,40 @@ function hashSlug(slug: string): number {
 }
 
 /**
+ * Color for a template ROLE (cmo, google_ads, seo). Canonical lookup for
+ * the sidebar role pill + cron calendar swatches — both should agree on
+ * "CMO is blue" regardless of any personal-name suffix in the URL slug.
+ * Stable across the lifetime of the project.
+ */
+export function colorForRole(role: AgentTemplateKey): AgentColor {
+  return PALETTE[role];
+}
+
+/**
  * Resolve a color for an agent slug as it appears in our cron view.
- * Templates (cmo / google-ads / seo) get their reserved hue. Anything else
- * gets a stable color from the extras palette via slug hash — never the
- * zinc fallback, which reads as "disabled".
+ * Templates (cmo / google-ads / seo, with or without a `-<name>` suffix)
+ * get their reserved hue. Anything else gets a stable color from the
+ * extras palette via slug hash — never the zinc fallback, which reads
+ * as "disabled".
+ *
+ * Accepts both legacy bare slugs (`cmo`) and the new role-plus-name
+ * shape (`cmo-greg`) — the role prefix is matched against the palette
+ * before falling through to the hash bucket.
  */
 export function colorForAgentSlug(slug: string): AgentColor {
-  const normalized = slug.replace(/-/g, "_") as AgentTemplateKey;
-  const fromTemplate = PALETTE[normalized];
-  if (fromTemplate) return fromTemplate;
+  // Try a direct lookup first (handles legacy "cmo" / "seo" slugs).
+  const direct = PALETTE[slug.replace(/-/g, "_") as AgentTemplateKey];
+  if (direct) return direct;
+  // New shape: <role>-<name>. Walk the role keys longest-first so
+  // "google_ads" matches before "cmo" wouldn't accidentally match
+  // "cmo-anything".
+  const roleKeys = Object.keys(PALETTE) as AgentTemplateKey[];
+  const sorted = roleKeys.slice().sort((a, b) => b.length - a.length);
+  for (const role of sorted) {
+    const rolePrefix = role.replace(/_/g, "-");
+    if (slug === rolePrefix || slug.startsWith(`${rolePrefix}-`)) {
+      return PALETTE[role];
+    }
+  }
   return EXTRA_PALETTE[hashSlug(slug) % EXTRA_PALETTE.length]!;
 }

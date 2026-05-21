@@ -469,12 +469,12 @@ describe("cloneAgent", () => {
     expect(meta.agent_id).toBe("metaproj-metaclone");
     expect(meta.project_slug).toBe("metaproj");
     expect(meta.slug).toBe("metaclone");
-    expect(meta.display_name).toBe("Custom Display");
+    expect(meta.name).toBe("Custom Display");
     expect(meta.source_agent_id).toBe("meta-src");
     expect(typeof meta.created_at).toBe("string");
   });
 
-  it("defaults display_name to the source agent id when not provided", async () => {
+  it("defaults name to the source agent id when display_name is not provided", async () => {
     listAgentFilesMock.mockResolvedValueOnce({ agentId: "no-display-src", workspace: "/ws", files: [] });
     createAgentViaRpcMock.mockResolvedValueOnce(undefined);
     await cloneAgent({
@@ -488,6 +488,6 @@ describe("cloneAgent", () => {
         "utf8",
       ),
     );
-    expect(meta.display_name).toBe("no-display-src");
+    expect(meta.name).toBe("no-display-src");
   });
 });

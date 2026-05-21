@@ -2,7 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { openclaw } from "@/server/openclaw/cli";
-import { writeAgentMeta } from "@/server/agent-meta";
+import { readAgentMeta, writeAgentMeta } from "@/server/agent-meta";
 import {
   cleanupLegacyOrchestrationRows,
   ensureOrchestrationMcpInstalled,
@@ -99,7 +99,21 @@ Style:
 
 export type AgentTemplate = {
   key: "cmo" | "google_ads" | "seo";
+  /**
+   * Label for the ROLE this template represents (e.g. "CMO", "Google
+   * Ads"). Used in the sidebar role pill + anywhere the UI says
+   * "what kind of agent is this". Distinct from the agent's PERSONAL
+   * name (e.g. "Greg"); the personal name lives on AgentMeta.
+   */
   display_name: string;
+  /**
+   * Suggested personal name pre-filled into the onboarding form when
+   * the user provisions this template. Short + memorable so the
+   * sidebar reads like a team of named colleagues rather than a roster
+   * of job titles. Users can override during onboarding; the choice
+   * becomes immutable once the agent is created.
+   */
+  default_name: string;
   description: string;
   capabilities: string[];
   model: string;
@@ -144,6 +158,7 @@ export const TEMPLATES: AgentTemplate[] = [
   {
     key: "cmo",
     display_name: "CMO",
+    default_name: "Greg",
     description: "Chief Marketing Officer. Owns strategy and orchestrates the specialist agents.",
     capabilities: [
       "Talk through marketing strategy and prioritization",
@@ -161,6 +176,7 @@ ${CMO_ROLE}`,
   {
     key: "google_ads",
     display_name: "Google Ads",
+    default_name: "Ana",
     description: "Runs Google Ads campaigns, keywords, bids, budgets, search terms, negatives.",
     capabilities: [
       "Audit account health + identify wasted spend",
@@ -189,6 +205,7 @@ for files in your workspace, and the orchestration MCP for coordination.`,
   {
     key: "seo",
     display_name: "SEO",
+    default_name: "Sam",
     description: "SEO audits, content recommendations, ranking + click tracking, technical SEO.",
     capabilities: [
       "Audit on-page + technical SEO",
@@ -216,9 +233,46 @@ for files in your workspace, and the orchestration MCP for coordination.`,
 
 export function agentNameFor(project_slug: string, template_key: AgentTemplate["key"]): string {
   // OpenClaw agent name format: <project-slug>-<template-key>
-  // Avoids reserved names; lowercase + hyphen-only.
+  // Avoids reserved names; lowercase + hyphen-only. Note this is the
+  // BACKEND id used by OpenClaw — distinct from the URL slug, which
+  // also encodes the personal name (see agentUrlSlug).
   const safe_template = template_key.replace(/_/g, "-");
   return `${project_slug}-${safe_template}`;
+}
+
+/**
+ * URL slug for a template agent — `<role>-<slugified-name>`. The personal
+ * name is the user-chosen "Greg" / "Ana" etc; the role is the template
+ * key (cmo, google_ads → google-ads). Examples:
+ *
+ *   role=cmo,        name=Greg      → "cmo-greg"
+ *   role=google_ads, name="Ana Q4"  → "google-ads-ana-q4"
+ *
+ * This slug appears in URLs (`/agents/cmo-greg/tasks`) and is what
+ * resolveAgentBySlug looks up. It is computed — never stored — so a
+ * future rename of an agent's name (currently not allowed) would just
+ * flow through here. Because names are immutable post-creation, the
+ * slug is effectively immutable too.
+ */
+export function agentUrlSlug(
+  template_key: AgentTemplate["key"],
+  name: string,
+): string {
+  const role = template_key.replace(/_/g, "-");
+  return `${role}-${slugifyName(name)}`;
+}
+
+/**
+ * Lowercase, hyphen-only, no leading/trailing dashes. Trims to a sane
+ * length so a misbehaving name input can't blow up the URL.
+ */
+export function slugifyName(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 32);
 }
 
 export type EnsureAgentsResult = {
@@ -235,6 +289,12 @@ export type EnsureAgentsResult = {
  * every template — preserved for back-compat with existing call sites like
  * the reprovision endpoint.
  *
+ * `names` is an optional partial map of template_key → user-chosen personal
+ * name (e.g. { cmo: "Greg", google_ads: "Ana" }). Names are immutable post-
+ * creation — when the meta sidecar already has a `name`, we keep it and
+ * IGNORE this argument for that agent. Templates with no entry here fall
+ * back to the template's `default_name`.
+ *
  * The result includes `failed`: when a subprocess fails for one agent, the
  * loop logs + continues (partial provisioning is recoverable) and the
  * caller can decide whether `failed.length > 0` is fatal for their flow.
@@ -242,6 +302,7 @@ export type EnsureAgentsResult = {
 export async function ensureProjectAgents(
   project_slug: string,
   scope?: AgentTemplateKey[],
+  names?: Partial<Record<AgentTemplateKey, string>>,
 ): Promise<EnsureAgentsResult> {
   const created: string[] = [];
   const existed: string[] = [];
@@ -252,24 +313,27 @@ export async function ensureProjectAgents(
     : TEMPLATES;
 
   for (const template of templates) {
-    const name = agentNameFor(project_slug, template.key);
-    const workspaceAbs = workspaceDirFor(name);
-    const already = await agentExists(name);
+    const agentId = agentNameFor(project_slug, template.key);
+    const workspaceAbs = workspaceDirFor(agentId);
+    const already = await agentExists(agentId);
     if (already) {
       // Idempotently refresh the IDENTITY.md so prompt edits propagate to
       // existing agents without forcing the user to delete + recreate.
-      await writeIdentityFile(workspaceAbs, template, project_slug, name);
-      // Backfill the notfair meta sidecar in case this agent was created
-      // before we started writing it (so the sidebar still finds them).
+      await writeIdentityFile(workspaceAbs, template, project_slug, agentId);
+      // Read any existing meta so we PRESERVE the previously-chosen name
+      // (immutable per the agent model). Only when no sidecar exists yet
+      // do we fall back to the onboarding `names` map / template default.
+      const existing = readAgentMeta(agentId);
+      const personalName =
+        existing?.name ?? names?.[template.key] ?? template.default_name;
       await writeAgentMeta({
-        agent_id: name,
+        agent_id: agentId,
         project_slug,
-        slug: urlSlugForTemplate(template.key),
-        display_name: template.display_name,
+        name: personalName,
         template_key: template.key,
-        created_at: new Date().toISOString(),
+        created_at: existing?.created_at ?? new Date().toISOString(),
       });
-      existed.push(name);
+      existed.push(agentId);
       continue;
     }
     try {
@@ -283,26 +347,26 @@ export async function ensureProjectAgents(
       await openclaw([
         "agents",
         "add",
-        name,
+        agentId,
         "--non-interactive",
         "--workspace",
         workspaceAbs,
       ]);
-      await writeIdentityFile(workspaceAbs, template, project_slug, name);
+      await writeIdentityFile(workspaceAbs, template, project_slug, agentId);
+      const personalName = names?.[template.key] ?? template.default_name;
       await writeAgentMeta({
-        agent_id: name,
+        agent_id: agentId,
         project_slug,
-        slug: urlSlugForTemplate(template.key),
-        display_name: template.display_name,
+        name: personalName,
         template_key: template.key,
         created_at: new Date().toISOString(),
       });
-      created.push(name);
+      created.push(agentId);
     } catch (err) {
       // Surface but don't crash the loop; partial provisioning recoverable on retry.
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`Failed to create agent ${name}:`, err);
-      failed.push({ name, error: message });
+      console.error(`Failed to create agent ${agentId}:`, err);
+      failed.push({ name: agentId, error: message });
     }
   }
 

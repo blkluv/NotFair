@@ -129,7 +129,7 @@ export default async function AgentCronPage({
         <header className="flex flex-row items-center justify-between gap-4">
           <div>
             <h2 className="text-lg font-semibold tracking-tight">
-              {resolved.display_name}&rsquo;s scheduled work
+              {resolved.name}&rsquo;s scheduled work
             </h2>
             <p className="text-sm text-muted-foreground">
               {totalActive} active
@@ -153,7 +153,7 @@ export default async function AgentCronPage({
           <Card>
             <CardContent className="space-y-2 py-10 text-center">
               <p className="text-sm font-medium">
-                No scheduled work for {resolved.display_name} yet.
+                No scheduled work for {resolved.name} yet.
               </p>
               <p className="text-xs text-muted-foreground">
                 Ask the agent in chat (&ldquo;run a daily bid review at 9am&rdquo;) or

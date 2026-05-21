@@ -95,15 +95,15 @@ describe("getProjectDeletionSummary", () => {
     listProjectAgentsMock.mockResolvedValueOnce([
       {
         agent_id: "demo-cmo",
-        slug: "cmo",
-        display_name: "CMO",
+        slug: "cmo-greg",
+        name: "Greg",
         template_key: "cmo",
         is_template_default: true,
       },
       {
         agent_id: "demo-google-ads",
-        slug: "google-ads",
-        display_name: "Google Ads",
+        slug: "google-ads-ana",
+        name: "Ana",
         template_key: "google_ads",
         is_template_default: true,
       },
@@ -111,7 +111,7 @@ describe("getProjectDeletionSummary", () => {
       {
         agent_id: "demo-ghost",
         slug: "ghost",
-        display_name: "Ghost",
+        name: "Ghost",
         is_template_default: false,
       },
     ]);
@@ -190,8 +190,8 @@ describe("getProjectDeletionSummary", () => {
     listProjectAgentsMock.mockResolvedValueOnce([
       {
         agent_id: "demo-cmo",
-        slug: "cmo",
-        display_name: "Chief Marketing Officer",
+        slug: "cmo-greg",
+        name: "Chief Marketing Officer",
         template_key: "cmo",
         is_template_default: true,
       },

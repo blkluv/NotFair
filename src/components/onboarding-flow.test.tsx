@@ -238,11 +238,15 @@ describe("OnboardingFlow — ConnectStep", () => {
     );
   });
 
-  it("pushes the CMO tasks URL when the user clicks Skip", () => {
+  it("pushes the project home when the user clicks Skip", () => {
     setStep("connect", "acme");
     render(<OnboardingFlow />);
     fireEvent.click(screen.getByRole("button", { name: /Skip Google Ads/i }));
-    expect(routerPush).toHaveBeenCalledWith("/acme/agents/cmo/tasks");
+    // After the agent-identity refactor, CMO URL slugs encode the user-
+    // chosen name (`cmo-<name>`), so we can't hardcode `/agents/cmo/tasks`
+    // here. Sending the user to the project home is correct — the sidebar
+    // surfaces the named CMO from there.
+    expect(routerPush).toHaveBeenCalledWith("/acme");
   });
 });
 
@@ -272,8 +276,8 @@ describe("OnboardingFlow — AccountStep", () => {
       screen.getByRole("link", { name: /Retry from start/i }),
     ).toHaveAttribute("href", "/onboarding");
     expect(
-      screen.getByRole("link", { name: /Skip to chat/i }),
-    ).toHaveAttribute("href", "/acme/agents/cmo/chat");
+      screen.getByRole("link", { name: /Skip to project/i }),
+    ).toHaveAttribute("href", "/acme");
   });
 
   it("renders the no-accounts state with reconnect link when the list is empty", async () => {
@@ -305,6 +309,7 @@ describe("OnboardingFlow — AccountStep", () => {
       ok: true,
       project: {},
       task_display_id: "AUDIT-1",
+      cmo_agent_slug: "cmo-greg",
     });
     setStep("account", "acme");
     render(<OnboardingFlow />);
@@ -313,7 +318,7 @@ describe("OnboardingFlow — AccountStep", () => {
     );
     await waitFor(() =>
       expect(routerReplace).toHaveBeenCalledWith(
-        "/acme/agents/cmo/tasks?task=AUDIT-1",
+        "/acme/agents/cmo-greg/tasks?task=AUDIT-1",
       ),
     );
   });
@@ -370,6 +375,7 @@ describe("OnboardingFlow — AccountStep", () => {
       ok: true,
       project: {},
       task_display_id: "TASK-9",
+      cmo_agent_slug: "cmo-greg",
     });
     setStep("account", "acme");
     render(<OnboardingFlow />);
@@ -382,7 +388,7 @@ describe("OnboardingFlow — AccountStep", () => {
     );
     await waitFor(() =>
       expect(routerReplace).toHaveBeenCalledWith(
-        "/acme/agents/cmo/tasks?task=TASK-9",
+        "/acme/agents/cmo-greg/tasks?task=TASK-9",
       ),
     );
   });

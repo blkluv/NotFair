@@ -662,7 +662,7 @@ export async function handleListProjectAgents(
     data: entries.map((e) => ({
       agent_id: e.agent_id,
       slug: e.slug,
-      display_name: e.display_name,
+      display_name: e.name,
       description: e.description ?? "",
       template_key: e.template_key ?? null,
       is_template_default: Boolean(e.is_template_default),

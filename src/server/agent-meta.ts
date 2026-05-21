@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   TEMPLATES,
   agentNameFor,
+  agentUrlSlug,
   urlSlugForTemplate,
   type AgentTemplateKey,
 } from "./agent-templates";
@@ -21,10 +22,20 @@ export type AgentMeta = {
   agent_id: string;
   /** Project slug this agent belongs to. */
   project_slug: string;
-  /** URL-friendly slug (post-project prefix), e.g. `cmo`, `supa-clone`. */
-  slug: string;
-  /** Display name shown in sidebar / chat headers. */
-  display_name: string;
+  /**
+   * Personal name the user assigned (e.g. "Greg", "Ana"). IMMUTABLE —
+   * set once at agent-create time. The URL slug is computed from this
+   * + template_key (see agentUrlSlug); the sidebar shows this as the
+   * primary label next to a role pill.
+   */
+  name: string;
+  /**
+   * URL slug — stored ONLY for non-template (cloned/custom) agents,
+   * where there's no role+name pair to compute from. Template agents
+   * always compute their slug from template_key + name and never write
+   * this field.
+   */
+  slug?: string;
   /** If from one of our bootstrap templates, which one. */
   template_key?: AgentTemplateKey;
   /** When cloned, the source agentId. */
@@ -58,10 +69,16 @@ export function readAgentMeta(agentId: string): AgentMeta | null {
 
 export type ProjectAgentEntry = {
   agent_id: string;
+  /**
+   * URL slug. For template agents: `<role>-<slugified-name>` computed
+   * from template_key + name. For cloned/custom: the stored slug.
+   */
   slug: string;
-  display_name: string;
-  description?: string;
+  /** Personal name (e.g. "Greg"). */
+  name: string;
+  /** Role identifier (template key). Undefined for cloned/custom agents. */
   template_key?: AgentTemplateKey;
+  description?: string;
   source_agent_id?: string;
   is_template_default: boolean;
 };
@@ -84,10 +101,14 @@ export async function listProjectAgents(project_slug: string): Promise<ProjectAg
   for (const t of TEMPLATES) {
     if (!t.default_onboarding) continue;
     const agentId = agentNameFor(project_slug, t.key);
+    // Placeholder entry shown before a meta sidecar exists on disk.
+    // Uses the template's default_name as the personal name so the
+    // sidebar reads sensibly even during the brief window between
+    // project-create and ensureProjectAgents finishing.
     result.set(agentId, {
       agent_id: agentId,
-      slug: urlSlugForTemplate(t.key),
-      display_name: t.display_name,
+      slug: agentUrlSlug(t.key, t.default_name),
+      name: t.default_name,
       description: t.description,
       template_key: t.key,
       is_template_default: true,
@@ -109,10 +130,19 @@ export async function listProjectAgents(project_slug: string): Promise<ProjectAg
     if (!entry.startsWith(prefix)) continue;
     const meta = readAgentMeta(entry);
     if (!meta) continue;
+    // Template agents: slug is COMPUTED from template_key + name; we
+    //   ignore any stored slug (templates don't write one).
+    // Cloned/custom: slug came from the sidecar (clone-agent writes it).
+    const template = meta.template_key
+      ? TEMPLATES.find((t) => t.key === meta.template_key)
+      : undefined;
+    const slug = template
+      ? agentUrlSlug(template.key, meta.name)
+      : meta.slug ?? slugifyForCustom(meta.name);
     result.set(meta.agent_id, {
       agent_id: meta.agent_id,
-      slug: meta.slug,
-      display_name: meta.display_name,
+      slug,
+      name: meta.name,
       template_key: meta.template_key,
       source_agent_id: meta.source_agent_id,
       is_template_default: false,
@@ -134,9 +164,25 @@ export function workspaceDirFor(agentId: string): string {
   return join(notfairDataDir(), "agents", agentId);
 }
 
+/**
+ * Fallback slug generator for cloned/custom agents (no template_key) whose
+ * sidecar lacks an explicit `slug` field. Same shape as slugifyName but
+ * lives here to avoid the agent-templates dependency for non-template
+ * code paths.
+ */
+function slugifyForCustom(s: string): string {
+  return s
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 32);
+}
+
 export type ResolvedAgent = {
   agent_id: string;
-  display_name: string;
+  /** Personal name (e.g. "Greg"). */
+  name: string;
   slug: string;
   template_key?: AgentTemplateKey;
 };
@@ -155,7 +201,7 @@ export async function resolveAgentBySlug(
   if (!hit) return null;
   return {
     agent_id: hit.agent_id,
-    display_name: hit.display_name,
+    name: hit.name,
     slug: hit.slug,
     template_key: hit.template_key,
   };

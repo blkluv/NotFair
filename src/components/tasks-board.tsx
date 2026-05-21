@@ -248,7 +248,7 @@ export function TasksBoard({ projectSlug, tasks, agents }: Props) {
                   >
                     {active && <Check className="size-2.5" />}
                   </span>
-                  <span className="truncate">{a.display_name}</span>
+                  <span className="truncate">{a.name}</span>
                   <span className="ml-auto font-mono text-[10px] text-muted-foreground">
                     {countForAgent(filteredTasks, tasks, a.agent_id)}
                   </span>
@@ -496,7 +496,7 @@ function KanbanView({
                     key={t.id}
                     task={t}
                     projectSlug={projectSlug}
-                    assignee={agentById.get(t.agent_id)?.display_name ?? t.agent_id}
+                    assignee={agentById.get(t.agent_id)?.name ?? t.agent_id}
                   />
                 ))
               )}
@@ -630,7 +630,7 @@ function ListView({
                 )}
               </span>
               <span className="truncate text-muted-foreground">
-                {agentById.get(t.agent_id)?.display_name ?? t.agent_id}
+                {agentById.get(t.agent_id)?.name ?? t.agent_id}
               </span>
               <span className="truncate text-right text-[11px] text-muted-foreground">
                 {relativeTime(t.updated_at)}
@@ -649,7 +649,7 @@ function agentLabel(
   agentById: Map<string, ProjectAgentEntry>,
   agentId: string,
 ): string {
-  return agentById.get(agentId)?.display_name ?? agentId;
+  return agentById.get(agentId)?.name ?? agentId;
 }
 
 function countForAgent(

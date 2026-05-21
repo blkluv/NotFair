@@ -98,6 +98,19 @@ export async function createProjectForOnboardingAction(
   const website_url = String(formData.get("website_url") ?? "").trim() || null;
   const codebase_path = String(formData.get("codebase_path") ?? "").trim() || null;
 
+  // Personal names for the team. Pre-filled with template defaults on the
+  // client; we still read off the form rather than baking the defaults
+  // here so the user's choice is the single source of truth. Blank
+  // values fall back to template.default_name inside ensureProjectAgents.
+  const agent_name_cmo = String(formData.get("agent_name_cmo") ?? "").trim();
+  const agent_name_google_ads = String(
+    formData.get("agent_name_google_ads") ?? "",
+  ).trim();
+  const agent_names = {
+    ...(agent_name_cmo ? { cmo: agent_name_cmo } : {}),
+    ...(agent_name_google_ads ? { google_ads: agent_name_google_ads } : {}),
+  } as Partial<Record<"cmo" | "google_ads" | "seo", string>>;
+
   const result = createProject({ display_name, website_url, codebase_path });
   if (!result.ok) return { ok: false, error: result.reason };
 
@@ -105,6 +118,7 @@ export async function createProjectForOnboardingAction(
   const provisionPromise = ensureProjectAgents(
     result.project.slug,
     DEFAULT_ONBOARDING_TEMPLATE_KEYS,
+    agent_names,
   );
   startProvisioning(result.project.slug, provisionPromise);
   // After provisioning resolves, mint + start the CMO's project-onboarding
@@ -327,7 +341,7 @@ export async function renameProjectFullAction(
         source_project_slug: current.slug,
         new_project_slug: newSlug,
         new_slug: a.slug,
-        new_display_name: a.display_name,
+        new_display_name: a.name,
         preserve_template_key: a.template_key,
         preserve_source_agent_id: meta?.source_agent_id,
         preserve_created_at: meta?.created_at,

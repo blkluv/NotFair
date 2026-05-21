@@ -57,7 +57,7 @@ export async function getProjectDeletionSummary(
     const threadCount = exists ? listSessionsForAgent(e.agent_id).length : 0;
     return {
       template: e.template_key,
-      display_name: e.display_name,
+      display_name: e.name,
       agentId: e.agent_id,
       exists,
       threadCount,

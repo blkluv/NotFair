@@ -99,7 +99,7 @@ export async function createAgentAction(
       agent_id: agentId,
       project_slug: project.slug,
       slug: slug.slug,
-      display_name: input.display_name.trim(),
+      name: input.display_name.trim(),
       created_at: new Date().toISOString(),
     });
   } catch (err) {
@@ -213,11 +213,13 @@ export async function relocateAgent(
 
   // Overwrite meta to drop the clone-provenance fields that cloneAgent set,
   // and preserve the caller-supplied identity (template_key, source, created).
+  // Template agents don't persist `slug` (it's computed); clones do.
+  const isTemplateAgent = !!input.preserve_template_key;
   await writeAgentMeta({
     agent_id: cloneResult.new_agent_id,
     project_slug: input.new_project_slug,
-    slug: cloneResult.new_slug,
-    display_name: input.new_display_name,
+    ...(isTemplateAgent ? {} : { slug: cloneResult.new_slug }),
+    name: input.new_display_name,
     ...(input.preserve_template_key ? { template_key: input.preserve_template_key } : {}),
     ...(input.preserve_source_agent_id
       ? { source_agent_id: input.preserve_source_agent_id }
@@ -256,100 +258,23 @@ export type RenameAgentData = {
 };
 
 /**
- * Rename an agent. OpenClaw treats the agent_id as immutable, so a "real"
- * rename — where the URL slug, cron names, workspace dir, and sessions dir all
- * pick up the new name — has to be done by self-cloning into a new agent_id
- * and deleting the old one.
+ * Per the agent-identity refactor, agents are IMMUTABLE after creation:
+ * the name set during onboarding (or clone time) is permanent and the URL
+ * slug is computed from it. This action is preserved so internal callers
+ * (project-rename cascade via relocateAgent) keep working, but the
+ * user-facing rename UI has been removed.
  *
- * When the new display name slugifies to the same value as the current slug,
- * we short-circuit and just update our meta sidecar. Cheap, no data motion.
+ * For template agents the action refuses — template names are part of the
+ * sidebar/role-pill identity the user named at onboarding. For cloned/
+ * custom agents the action also refuses; they were already named at clone
+ * time.
  */
 export async function renameAgentAction(
-  input: RenameAgentInput,
+  _input: RenameAgentInput,
 ): Promise<ActionResult<RenameAgentData>> {
-  const project = await getActiveProject();
-  if (!project) return { ok: false, error: "No active project." };
-
-  const newName = input.new_display_name.trim();
-  if (!newName) return { ok: false, error: "Name cannot be empty." };
-
-  const newSlugResult = slugify(newName);
-  if (!newSlugResult.ok) {
-    return { ok: false, error: `Invalid name: ${newSlugResult.reason}` };
-  }
-  const newSlug = newSlugResult.slug;
-
-  const existingMeta = readAgentMeta(input.agent_id);
-  if (!existingMeta) {
-    return { ok: false, error: `Agent '${input.agent_id}' has no meta on disk.` };
-  }
-  if (existingMeta.project_slug !== project.slug) {
-    return { ok: false, error: "Agent belongs to a different project." };
-  }
-
-  // Display-name-only change → just rewrite the meta sidecar.
-  if (newSlug === existingMeta.slug) {
-    if (newName === existingMeta.display_name) {
-      return {
-        ok: true,
-        data: {
-          agent_id: input.agent_id,
-          slug: existingMeta.slug,
-          display_name: existingMeta.display_name,
-          full_rename: false,
-        },
-      };
-    }
-    await writeAgentMeta({ ...existingMeta, display_name: newName });
-    revalidatePath("/", "layout");
-    return {
-      ok: true,
-      data: {
-        agent_id: input.agent_id,
-        slug: existingMeta.slug,
-        display_name: newName,
-        full_rename: false,
-      },
-    };
-  }
-
-  // Real rename — different slug. Refuse if the new slug is taken.
-  if (agentExistsInProject(project.slug, newSlug)) {
-    return {
-      ok: false,
-      error: `An agent named "${newSlug}" already exists in this project.`,
-    };
-  }
-
-  let relocated: RelocateAgentResult;
-  try {
-    relocated = await relocateAgent({
-      old_agent_id: input.agent_id,
-      source_project_slug: project.slug,
-      new_project_slug: project.slug,
-      new_slug: newSlug,
-      new_display_name: newName,
-      preserve_template_key: existingMeta.template_key,
-      preserve_created_at: existingMeta.created_at,
-      // Renames intentionally drop the clone provenance — the new agent is
-      // not a clone of the old one, it IS the old one with a new identity.
-    });
-  } catch (err) {
-    return {
-      ok: false,
-      error: `Rename failed: ${err instanceof Error ? err.message : String(err)}`,
-    };
-  }
-
-  revalidatePath("/", "layout");
   return {
-    ok: true,
-    data: {
-      agent_id: relocated.new_agent_id,
-      slug: relocated.new_slug,
-      display_name: newName,
-      full_rename: true,
-    },
+    ok: false,
+    error: "Agents are immutable once created. To use a different name, clone the agent and delete the original.",
   };
 }
 
@@ -398,7 +323,7 @@ export async function getAgentDeletionSummaryAction(
     ok: true,
     data: {
       agent_id,
-      display_name: meta?.display_name ?? agent_id,
+      display_name: meta?.name ?? agent_id,
       exists_in_openclaw: existsInOpenclaw,
       threads,
       crons,

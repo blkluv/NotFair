@@ -74,18 +74,21 @@ vi.mock("./agent-templates", () => ({
     {
       key: "cmo",
       display_name: "CMO",
+      default_name: "Greg",
       description: "Chief Marketing Officer.",
       default_onboarding: true,
     },
     {
       key: "google_ads",
       display_name: "Google Ads",
+      default_name: "Ana",
       description: "Google Ads specialist.",
       default_onboarding: true,
     },
     {
       key: "seo",
       display_name: "SEO",
+      default_name: "Sam",
       description: "SEO specialist.",
       // Opt-in template: not pre-seeded, only appears via meta sidecar.
       default_onboarding: false,
@@ -94,6 +97,13 @@ vi.mock("./agent-templates", () => ({
   agentNameFor: (slug: string, key: string) =>
     `${slug}-${key.replace(/_/g, "-")}`,
   urlSlugForTemplate: (key: string) => key.replace(/_/g, "-"),
+  agentUrlSlug: (key: string, n: string) =>
+    `${key.replace(/_/g, "-")}-${n
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 32)}`,
 }));
 
 import {
@@ -117,7 +127,7 @@ function makeMeta(overrides: Partial<AgentMeta> = {}): AgentMeta {
     agent_id: "acme-cmo",
     project_slug: "acme",
     slug: "cmo",
-    display_name: "CMO",
+    name: "CMO",
     template_key: "cmo",
     created_at: "2026-01-01T00:00:00Z",
     ...overrides,
@@ -181,7 +191,7 @@ describe("writeAgentMeta + readAgentMeta", () => {
     const meta = makeMeta({
       agent_id: "acme-supa-clone",
       slug: "supa-clone",
-      display_name: "Supabase Clone",
+      name: "Supabase Clone",
       source_agent_id: "acme-cmo",
     });
     await writeAgentMeta(meta);
@@ -217,7 +227,7 @@ describe("listProjectAgents", () => {
       makeMeta({
         agent_id: "acme-seo",
         slug: "seo",
-        display_name: "SEO",
+        name: "SEO",
         template_key: "seo",
       }),
     );
@@ -234,7 +244,7 @@ describe("listProjectAgents", () => {
     const r = await listProjectAgents("acme");
     const cmo = r.find((e) => e.agent_id === "acme-cmo");
     expect(cmo?.is_template_default).toBe(false);
-    expect(cmo?.display_name).toBe("CMO");
+    expect(cmo?.name).toBe("CMO");
   });
 
   it("includes a cloned/custom agent with its source_agent_id surfaced", async () => {
@@ -242,7 +252,7 @@ describe("listProjectAgents", () => {
       makeMeta({
         agent_id: "acme-supa-clone",
         slug: "supa-clone",
-        display_name: "Supa Clone",
+        name: "Supa Clone",
         template_key: undefined,
         source_agent_id: "acme-cmo",
       }),
@@ -252,7 +262,7 @@ describe("listProjectAgents", () => {
     expect(clone).toMatchObject({
       agent_id: "acme-supa-clone",
       slug: "supa-clone",
-      display_name: "Supa Clone",
+      name: "Supa Clone",
       source_agent_id: "acme-cmo",
       is_template_default: false,
     });
@@ -263,7 +273,7 @@ describe("listProjectAgents", () => {
       makeMeta({
         agent_id: "acme-z-tool",
         slug: "z-tool",
-        display_name: "Z Tool",
+        name: "Z Tool",
         template_key: undefined,
       }),
     );
@@ -271,16 +281,17 @@ describe("listProjectAgents", () => {
       makeMeta({
         agent_id: "acme-a-tool",
         slug: "a-tool",
-        display_name: "A Tool",
+        name: "A Tool",
         template_key: undefined,
       }),
     );
     const r = await listProjectAgents("acme");
     // Onboarding-default templates first in declared order (SEO is opt-in
-    // and not seeded), then custom alphabetically by slug.
+    // and not seeded), then custom alphabetically by slug. Template slugs
+    // are computed `<role>-<slugified-name>` from the default_name.
     expect(r.map((e) => e.slug)).toEqual([
-      "cmo",
-      "google-ads",
+      "cmo-greg",
+      "google-ads-ana",
       "a-tool",
       "z-tool",
     ]);
@@ -292,7 +303,7 @@ describe("listProjectAgents", () => {
         agent_id: "globex-cmo",
         project_slug: "globex",
         slug: "cmo",
-        display_name: "Globex CMO",
+        name: "Globex CMO",
       }),
     );
     const r = await listProjectAgents("acme");
@@ -313,21 +324,23 @@ describe("listProjectAgents", () => {
 });
 
 describe("resolveAgentBySlug", () => {
-  it("resolves a template URL slug to its agent_id", async () => {
+  it("resolves a template URL slug (role-name shape) to its agent_id", async () => {
     fsState.missingDirs.add("/data/agents");
-    const r = await resolveAgentBySlug("acme", "google-ads");
+    // Template agents are pre-seeded with their default_name → the URL
+    // slug is `<role>-<default_name>` for the placeholder entry.
+    const r = await resolveAgentBySlug("acme", "google-ads-ana");
     expect(r).toEqual({
       agent_id: "acme-google-ads",
-      display_name: "Google Ads",
-      slug: "google-ads",
+      name: "Ana",
+      slug: "google-ads-ana",
       template_key: "google_ads",
     });
   });
 
-  it("resolves the bare 'cmo' slug", async () => {
+  it("returns null for the bare role slug (the new shape is role-name)", async () => {
     fsState.missingDirs.add("/data/agents");
     const r = await resolveAgentBySlug("acme", "cmo");
-    expect(r?.agent_id).toBe("acme-cmo");
+    expect(r).toBeNull();
   });
 
   it("resolves a custom (non-template) agent by its meta slug", async () => {
@@ -335,14 +348,14 @@ describe("resolveAgentBySlug", () => {
       makeMeta({
         agent_id: "acme-supa-clone",
         slug: "supa-clone",
-        display_name: "Supa Clone",
+        name: "Supa Clone",
         template_key: undefined,
       }),
     );
     const r = await resolveAgentBySlug("acme", "supa-clone");
     expect(r).toEqual({
       agent_id: "acme-supa-clone",
-      display_name: "Supa Clone",
+      name: "Supa Clone",
       slug: "supa-clone",
       template_key: undefined,
     });

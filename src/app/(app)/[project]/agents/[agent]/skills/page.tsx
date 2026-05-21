@@ -35,7 +35,7 @@ export default async function AgentSkillsPage({
         <header>
           <h2 className="text-lg font-semibold tracking-tight">Skills</h2>
           <p className="text-sm text-muted-foreground">
-            Capabilities OpenClaw exposes to {resolved.display_name}.
+            Capabilities OpenClaw exposes to {resolved.name}.
             {report?.agentSkillFilter?.length
               ? ` Filtered to this agent's allowlist (${report.agentSkillFilter.length}).`
               : " Workspace-wide; no per-agent filter."}

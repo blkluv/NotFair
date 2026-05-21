@@ -78,7 +78,7 @@ export default async function AgentTasksPage({ params, searchParams }: Props) {
       projectSlug={projectSlug}
       agentSlug={agentSlug}
       agentFullId={agentFullId}
-      agentDisplayName={resolved.display_name}
+      agentDisplayName={resolved.name}
       tasks={tasks}
       selected={selected}
       proposedCount={proposedCount}

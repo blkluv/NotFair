@@ -158,7 +158,7 @@ function NameStep({ onCreated }: { onCreated: (slug: string) => void }) {
         <CardContent>
           <form action={formAction} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="display_name">Name</Label>
+              <Label htmlFor="display_name">Project name</Label>
               <Input
                 id="display_name"
                 name="display_name"
@@ -168,6 +168,54 @@ function NameStep({ onCreated }: { onCreated: (slug: string) => void }) {
                 maxLength={80}
                 disabled={isPending}
               />
+            </div>
+
+            <div className="rounded-md border border-dashed bg-muted/30 p-3 space-y-3">
+              <div className="space-y-1">
+                <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Your team
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Name your CMO and Google Ads specialist. Pick something
+                  memorable — these stay fixed for the life of the project.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label
+                    htmlFor="agent_name_cmo"
+                    className="text-xs font-medium text-foreground"
+                  >
+                    CMO
+                  </Label>
+                  <Input
+                    id="agent_name_cmo"
+                    name="agent_name_cmo"
+                    defaultValue="Greg"
+                    placeholder="Greg"
+                    maxLength={32}
+                    disabled={isPending}
+                    required
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label
+                    htmlFor="agent_name_google_ads"
+                    className="text-xs font-medium text-foreground"
+                  >
+                    Google Ads
+                  </Label>
+                  <Input
+                    id="agent_name_google_ads"
+                    name="agent_name_google_ads"
+                    defaultValue="Ana"
+                    placeholder="Ana"
+                    maxLength={32}
+                    disabled={isPending}
+                    required
+                  />
+                </div>
+              </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="website_url">
@@ -223,7 +271,10 @@ function ConnectStep({ slug }: { slug: string }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const connectionsHref = projectHref(slug, "/connections");
-  const cmoTasksHref = projectHref(slug, "/agents/cmo/tasks");
+  // Project home — sidebar leads the user to the CMO from there.
+  // (We can't hardcode /agents/<role-name>/tasks because the URL slug is
+  // user-customizable as <role>-<name>.)
+  const projectHome = projectHref(slug, "");
 
   async function onConnect() {
     setBusy(true);
@@ -249,7 +300,7 @@ function ConnectStep({ slug }: { slug: string }) {
     // Without Google Ads connected, there's nothing for the CMO to audit
     // yet — drop the user on the CMO's task tab so they can see "no tasks
     // assigned, connect Google Ads to start".
-    router.push(cmoTasksHref);
+    router.push(projectHome);
   }
 
   return (
@@ -356,7 +407,7 @@ function AccountStep({ slug }: { slug: string }) {
       router.replace(
         projectHref(
           slug,
-          `/agents/cmo/tasks?task=${encodeURIComponent(result.task_display_id)}`,
+          `/agents/${result.cmo_agent_slug}/tasks?task=${encodeURIComponent(result.task_display_id)}`,
         ),
       );
     })();
@@ -374,7 +425,7 @@ function AccountStep({ slug }: { slug: string }) {
       router.replace(
         projectHref(
           slug,
-          `/agents/cmo/tasks?task=${encodeURIComponent(result.task_display_id)}`,
+          `/agents/${result.cmo_agent_slug}/tasks?task=${encodeURIComponent(result.task_display_id)}`,
         ),
       );
     } catch (err) {
@@ -412,7 +463,7 @@ function AccountStep({ slug }: { slug: string }) {
               <Link href="/onboarding">Retry from start</Link>
             </Button>
             <Button variant="outline" asChild>
-              <Link href={projectHref(slug, "/agents/cmo/chat")}>Skip to chat</Link>
+              <Link href={projectHref(slug, "")}>Skip to project</Link>
             </Button>
           </div>
         </CardContent>
@@ -441,7 +492,7 @@ function AccountStep({ slug }: { slug: string }) {
               </Link>
             </Button>
             <Button variant="outline" asChild>
-              <Link href={projectHref(slug, "/agents/cmo/chat")}>Skip to chat</Link>
+              <Link href={projectHref(slug, "")}>Skip to project</Link>
             </Button>
           </div>
         </CardContent>

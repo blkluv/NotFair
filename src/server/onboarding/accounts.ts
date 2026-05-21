@@ -121,7 +121,14 @@ function parseAccountsPayload(
 }
 
 export type SetAccountResult =
-  | { ok: true; project: Project; task_display_id: string }
+  | {
+      ok: true;
+      project: Project;
+      task_display_id: string;
+      /** URL slug for the CMO so the client can navigate to its tasks
+       *  page without recomputing `<role>-<name>` itself. */
+      cmo_agent_slug: string;
+    }
   | { ok: false; error: string };
 
 /**
@@ -224,6 +231,20 @@ export async function setOnboardingAccountAction(
   //     /api/chat (which atomically claims). For the resubmit branch
   //     (audit already running/done) /api/chat is a safe no-op.
 
+  // Resolve the CMO's URL slug so the client can land on its tasks page
+  // without computing the role-name slug itself.
+  const { readAgentMeta } = await import("@/server/agent-meta");
+  const { agentUrlSlug, TEMPLATES } = await import("@/server/agent-templates");
+  const cmoMeta = readAgentMeta(cmoAgentId);
+  const cmoName =
+    cmoMeta?.name ?? TEMPLATES.find((t) => t.key === "cmo")!.default_name;
+  const cmo_agent_slug = agentUrlSlug("cmo", cmoName);
+
   revalidatePath("/", "layout");
-  return { ok: true, project: updated, task_display_id: task.display_id };
+  return {
+    ok: true,
+    project: updated,
+    task_display_id: task.display_id,
+    cmo_agent_slug,
+  };
 }

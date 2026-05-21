@@ -119,7 +119,7 @@ describe("listOpenClawAgentsAction", () => {
   it("merges openclaw list with project agent ids and marks membership", async () => {
     getActiveProjectMock.mockResolvedValueOnce(project());
     listProjectAgentsMock.mockResolvedValueOnce([
-      { agent_id: "acme-cmo", slug: "cmo", display_name: "CMO", is_template_default: true },
+      { agent_id: "acme-cmo", slug: "cmo-greg", name: "Greg", template_key: "cmo", is_template_default: true },
     ]);
     listAllAgentsMock.mockResolvedValueOnce({
       agents: [
@@ -180,7 +180,7 @@ describe("listProjectAgentsAction", () => {
   it("returns project agents on happy path", async () => {
     getActiveProjectMock.mockResolvedValueOnce(project());
     listProjectAgentsMock.mockResolvedValueOnce([
-      { agent_id: "acme-cmo", slug: "cmo", display_name: "CMO", is_template_default: true },
+      { agent_id: "acme-cmo", slug: "cmo-greg", name: "Greg", template_key: "cmo", is_template_default: true },
     ]);
     const r = await listProjectAgentsAction();
     expect(r.ok).toBe(true);
@@ -371,193 +371,18 @@ describe("removeCronsAction", () => {
 });
 
 describe("renameAgentAction", () => {
-  it("rejects when no active project", async () => {
-    getActiveProjectMock.mockResolvedValueOnce(null);
-    const r = await renameAgentAction({
-      agent_id: "acme-foo",
-      new_display_name: "Bar",
-    });
-    expect(r.ok).toBe(false);
-  });
-
-  it("rejects when new display name is blank", async () => {
-    getActiveProjectMock.mockResolvedValueOnce(project());
-    const r = await renameAgentAction({
-      agent_id: "acme-foo",
-      new_display_name: "   ",
-    });
-    expect(r.ok).toBe(false);
-    if (r.ok) return;
-    expect(r.error).toMatch(/Name cannot be empty/);
-  });
-
-  it("rejects when slugify fails (e.g. all symbols)", async () => {
-    getActiveProjectMock.mockResolvedValueOnce(project());
-    const r = await renameAgentAction({
-      agent_id: "acme-foo",
-      new_display_name: "@@@",
-    });
-    expect(r.ok).toBe(false);
-    if (r.ok) return;
-    expect(r.error).toMatch(/Invalid name/);
-  });
-
-  it("rejects when meta sidecar is missing", async () => {
-    getActiveProjectMock.mockResolvedValueOnce(project());
-    readAgentMetaMock.mockReturnValueOnce(null);
+  // Agents are immutable per the identity refactor — the name set at
+  // onboarding (or clone time) is permanent. The action exists only so
+  // import sites keep typechecking; every call must refuse with a
+  // clear, actionable error message.
+  it("refuses with an immutability error", async () => {
     const r = await renameAgentAction({
       agent_id: "acme-foo",
       new_display_name: "Bar",
     });
     expect(r.ok).toBe(false);
     if (r.ok) return;
-    expect(r.error).toMatch(/no meta on disk/);
-  });
-
-  it("rejects when meta says agent belongs to a different project", async () => {
-    getActiveProjectMock.mockResolvedValueOnce(project("acme"));
-    readAgentMetaMock.mockReturnValueOnce({
-      agent_id: "other-foo",
-      project_slug: "other",
-      slug: "foo",
-      display_name: "Foo",
-      created_at: "now",
-    });
-    const r = await renameAgentAction({
-      agent_id: "other-foo",
-      new_display_name: "Bar",
-    });
-    expect(r.ok).toBe(false);
-    if (r.ok) return;
-    expect(r.error).toMatch(/different project/);
-  });
-
-  it("display-name-only change returns full_rename:false and rewrites meta", async () => {
-    getActiveProjectMock.mockResolvedValueOnce(project());
-    readAgentMetaMock.mockReturnValueOnce({
-      agent_id: "acme-foo",
-      project_slug: "acme",
-      slug: "foo",
-      display_name: "Foo",
-      created_at: "now",
-    });
-    // "FOO!" slugifies back to "foo" so the slug is unchanged → display-only.
-    const r = await renameAgentAction({
-      agent_id: "acme-foo",
-      new_display_name: "FOO!",
-    });
-    expect(r.ok).toBe(true);
-    if (!r.ok) return;
-    expect(r.data.full_rename).toBe(false);
-    expect(r.data.display_name).toBe("FOO!");
-    expect(writeAgentMetaMock).toHaveBeenCalled();
-    expect(revalidatePathMock).toHaveBeenCalled();
-  });
-
-  it("no-op rename (same slug AND same display name) returns full_rename:false without writing meta", async () => {
-    getActiveProjectMock.mockResolvedValueOnce(project());
-    readAgentMetaMock.mockReturnValueOnce({
-      agent_id: "acme-foo",
-      project_slug: "acme",
-      slug: "foo",
-      display_name: "Foo",
-      created_at: "now",
-    });
-    const r = await renameAgentAction({
-      agent_id: "acme-foo",
-      new_display_name: "Foo",
-    });
-    expect(r.ok).toBe(true);
-    if (!r.ok) return;
-    expect(r.data.full_rename).toBe(false);
-    expect(writeAgentMetaMock).not.toHaveBeenCalled();
-  });
-
-  it("full rename rejected when destination slug already exists", async () => {
-    getActiveProjectMock.mockResolvedValueOnce(project());
-    readAgentMetaMock.mockReturnValueOnce({
-      agent_id: "acme-foo",
-      project_slug: "acme",
-      slug: "foo",
-      display_name: "Foo",
-      created_at: "now",
-    });
-    agentExistsInProjectMock.mockReturnValueOnce(true);
-    const r = await renameAgentAction({
-      agent_id: "acme-foo",
-      new_display_name: "Bar",
-    });
-    expect(r.ok).toBe(false);
-    if (r.ok) return;
-    expect(r.error).toMatch(/already exists/);
-  });
-
-  it("full rename calls relocateAgent (clone + delete) and returns new ids", async () => {
-    getActiveProjectMock.mockResolvedValueOnce(project());
-    readAgentMetaMock.mockReturnValueOnce({
-      agent_id: "acme-foo",
-      project_slug: "acme",
-      slug: "foo",
-      display_name: "Foo",
-      template_key: "google_ads",
-      created_at: "2024-01-01T00:00:00Z",
-    });
-    agentExistsInProjectMock.mockReturnValueOnce(false);
-    // relocateAgent's call to cloneAgent
-    cloneAgentMock.mockResolvedValueOnce({
-      new_agent_id: "acme-bar",
-      new_slug: "bar",
-      files_copied: 0,
-      sessions_copied: 0,
-      source_crons: [],
-      new_cron_ids: [],
-    });
-    // relocateAgent calls writeAgentMeta + cascadeDeleteAgent (which calls deleteAgent, listCronsForProject, rm, etc.)
-    writeAgentMetaMock.mockResolvedValue(undefined);
-    listCronsForProjectMock.mockResolvedValue({ groups: [] });
-    deleteAgentMock.mockResolvedValue(undefined);
-    existsSyncMock.mockReturnValue(false);
-
-    const r = await renameAgentAction({
-      agent_id: "acme-foo",
-      new_display_name: "Bar",
-    });
-    expect(r.ok).toBe(true);
-    if (!r.ok) return;
-    expect(r.data.full_rename).toBe(true);
-    expect(r.data.agent_id).toBe("acme-bar");
-    expect(r.data.slug).toBe("bar");
-    expect(cloneAgentMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        source_agent_id: "acme-foo",
-        project_slug: "acme",
-        new_slug: "bar",
-        display_name: "Bar",
-        slug_is_canonical: true,
-      }),
-    );
-    expect(revalidatePathMock).toHaveBeenCalledWith("/", "layout");
-  });
-
-  it("full rename surfaces relocate failures with a 'Rename failed' message", async () => {
-    getActiveProjectMock.mockResolvedValueOnce(project());
-    readAgentMetaMock.mockReturnValueOnce({
-      agent_id: "acme-foo",
-      project_slug: "acme",
-      slug: "foo",
-      display_name: "Foo",
-      created_at: "now",
-    });
-    agentExistsInProjectMock.mockReturnValueOnce(false);
-    cloneAgentMock.mockRejectedValueOnce(new Error("clone failed"));
-    const r = await renameAgentAction({
-      agent_id: "acme-foo",
-      new_display_name: "Bar",
-    });
-    expect(r.ok).toBe(false);
-    if (r.ok) return;
-    expect(r.error).toMatch(/Rename failed/);
-    expect(r.error).toMatch(/clone failed/);
+    expect(r.error).toMatch(/immutable/i);
   });
 });
 
@@ -587,12 +412,14 @@ describe("relocateAgent", () => {
       preserve_created_at: "2024-01-01T00:00:00Z",
     });
     expect(r).toEqual({ new_agent_id: "newproj-foo", new_slug: "foo" });
+    // Template agents don't persist `slug` on the sidecar (it's computed
+    // from template_key + name). The relocate writer is expected to omit
+    // it when preserve_template_key is set.
     expect(writeAgentMetaMock).toHaveBeenCalledWith(
       expect.objectContaining({
         agent_id: "newproj-foo",
         project_slug: "newproj",
-        slug: "foo",
-        display_name: "Foo",
+        name: "Foo",
         template_key: "google_ads",
         source_agent_id: "src-id",
         created_at: "2024-01-01T00:00:00Z",
@@ -677,7 +504,7 @@ describe("getAgentDeletionSummaryAction", () => {
       agent_id: "acme-foo",
       project_slug: "acme",
       slug: "foo",
-      display_name: "Foo Agent",
+      name: "Foo Agent",
       template_key: "google_ads",
       source_agent_id: "src",
       created_at: "now",

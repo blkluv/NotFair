@@ -160,12 +160,15 @@ export async function cloneAgent(input: CloneAgentInput): Promise<CloneAgentResu
     console.error("clone: could not list crons:", err);
   }
 
-  // 6) Meta sidecar so the sidebar shows the new agent.
+  // 6) Meta sidecar so the sidebar shows the new agent. Cloned agents
+  //    aren't backed by a template — they keep the user-chosen `slug`
+  //    on the sidecar (the rest of the system computes template agents'
+  //    slugs from template_key + name instead).
   await writeAgentMeta({
     agent_id: newAgentId,
     project_slug: input.project_slug,
     slug: newSlug,
-    display_name: displayName,
+    name: displayName,
     source_agent_id: input.source_agent_id,
     created_at: new Date().toISOString(),
   });

@@ -15,11 +15,8 @@ import { costToday } from "@/server/db/cost";
 import { listPendingApprovals } from "@/server/db/approvals";
 import { listTasks } from "@/server/db/tasks";
 import { listAgentActions } from "@/server/db/agent-actions";
-import {
-  TEMPLATES,
-  urlSlugForTemplate,
-  type AgentTemplateKey,
-} from "@/server/agent-templates";
+import { TEMPLATES } from "@/server/agent-templates";
+import { listProjectAgents } from "@/server/agent-meta";
 import { projectHref } from "@/lib/project-href";
 
 function formatUsd(n: number) {
@@ -47,6 +44,14 @@ export default async function ProjectHomePage({
   const pending = listPendingApprovals(project.slug);
   const tasks = listTasks(project.slug);
   const recent = listAgentActions(project.slug, 8);
+  const projectAgents = await listProjectAgents(project.slug);
+  // CMO's URL slug (e.g. "cmo-greg") for any "chat with CMO" deep links
+  // on this page. Falls back to a sensible empty path; the project home
+  // is fine if CMO somehow isn't provisioned yet.
+  const cmoAgent = projectAgents.find((a) => a.template_key === "cmo");
+  const cmoChatHref = cmoAgent
+    ? projectHref(slug, `/agents/${cmoAgent.slug}/chat`)
+    : projectHref(slug, "");
 
   // Intentionally NOT calling openclaw here. The cron tab is the source of
   // truth for scheduled jobs; calling `openclaw cron list` from the home page
@@ -63,7 +68,7 @@ export default async function ProjectHomePage({
           </p>
         </div>
         <Button asChild>
-          <Link href={projectHref(slug, "/agents/cmo/chat")}>
+          <Link href={cmoChatHref}>
             <MessageSquare className="mr-1.5 size-4" />
             Chat with CMO
           </Link>
@@ -116,20 +121,31 @@ export default async function ProjectHomePage({
             </div>
           </CardHeader>
           <CardContent className="space-y-2">
-            {TEMPLATES.map((t) => {
-              const agentSlug = urlSlugForTemplate(t.key as AgentTemplateKey);
+            {projectAgents.map((agent) => {
+              const role = agent.template_key
+                ? TEMPLATES.find((t) => t.key === agent.template_key)
+                : undefined;
               return (
                 <Link
-                  key={t.key}
-                  href={projectHref(slug, `/agents/${agentSlug}/chat`)}
+                  key={agent.agent_id}
+                  href={projectHref(slug, `/agents/${agent.slug}/chat`)}
                   className="flex items-center gap-3 rounded-md border bg-card p-3 transition-colors hover:bg-accent/50"
                 >
                   <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted">
                     <Bot className="size-4" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="font-medium">{t.display_name}</div>
-                    <p className="line-clamp-1 text-xs text-muted-foreground">{t.description}</p>
+                    <div className="flex items-baseline gap-2">
+                      <span className="font-medium">{agent.name}</span>
+                      {role && (
+                        <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                          {role.display_name}
+                        </span>
+                      )}
+                    </div>
+                    <p className="line-clamp-1 text-xs text-muted-foreground">
+                      {role?.description ?? agent.description ?? ""}
+                    </p>
                   </div>
                   <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
                 </Link>

@@ -102,7 +102,7 @@ export default async function AgentChatThreadPage({
           key={threadId}
           projectSlug={projectSlug}
           agentSlug={agentSlug}
-          agentDisplayName={resolved.display_name}
+          agentDisplayName={resolved.name}
           threadId={threadId}
           sessionKey={sessionKey}
           initialEvents={initialEvents}

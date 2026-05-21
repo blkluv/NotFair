@@ -30,20 +30,22 @@ import { AgentNav } from "./agent-nav";
 const agents = [
   {
     key: "proj-cmo",
-    slug: "cmo",
-    display_name: "CMO",
+    slug: "cmo-greg",
+    name: "Greg",
+    role_label: "CMO",
     template_key: "cmo" as const,
   },
   {
     key: "proj-google-ads",
-    slug: "google-ads",
-    display_name: "Google Ads",
+    slug: "google-ads-ana",
+    name: "Ana",
+    role_label: "Google Ads",
     template_key: "google_ads" as const,
   },
   {
     key: "proj-custom",
     slug: "custom",
-    display_name: "Custom Bot",
+    name: "Custom Bot",
   },
 ];
 
@@ -58,13 +60,15 @@ afterEach(() => {
 describe("AgentNav", () => {
   it("renders one entry per agent linking to the tasks tab", () => {
     render(<AgentNav projectSlug="proj" agents={agents} />);
-    expect(screen.getByRole("link", { name: /CMO/i })).toHaveAttribute(
+    // The link's accessible name includes the personal name + role pill
+    // text, so /Greg|CMO/i / /Ana|Google Ads/i both match.
+    expect(screen.getByRole("link", { name: /Greg/i })).toHaveAttribute(
       "href",
-      "/proj/agents/cmo/tasks",
+      "/proj/agents/cmo-greg/tasks",
     );
-    expect(screen.getByRole("link", { name: /Google Ads/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /Ana/i })).toHaveAttribute(
       "href",
-      "/proj/agents/google-ads/tasks",
+      "/proj/agents/google-ads-ana/tasks",
     );
     expect(screen.getByRole("link", { name: /Custom Bot/i })).toHaveAttribute(
       "href",
@@ -73,20 +77,20 @@ describe("AgentNav", () => {
   });
 
   it("marks the active agent when the pathname equals the agent base", () => {
-    pathnameRef.current = "/proj/agents/cmo";
+    pathnameRef.current = "/proj/agents/cmo-greg";
     render(<AgentNav projectSlug="proj" agents={agents} />);
     const buttons = screen.getAllByTestId("sidebar-button");
-    const cmoButton = buttons.find((b) => b.textContent?.includes("CMO"));
+    const cmoButton = buttons.find((b) => b.textContent?.includes("Greg"));
     expect(cmoButton?.getAttribute("data-active")).toBe("true");
     const customButton = buttons.find((b) => b.textContent?.includes("Custom Bot"));
     expect(customButton?.getAttribute("data-active")).toBe("false");
   });
 
   it("marks the active agent when the pathname is nested under the agent base", () => {
-    pathnameRef.current = "/proj/agents/google-ads/skills";
+    pathnameRef.current = "/proj/agents/google-ads-ana/skills";
     render(<AgentNav projectSlug="proj" agents={agents} />);
     const buttons = screen.getAllByTestId("sidebar-button");
-    const target = buttons.find((b) => b.textContent?.includes("Google Ads"));
+    const target = buttons.find((b) => b.textContent?.includes("Ana"));
     expect(target?.getAttribute("data-active")).toBe("true");
   });
 
