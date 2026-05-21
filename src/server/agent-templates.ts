@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { openclaw } from "@/server/openclaw/cli";
@@ -248,6 +248,10 @@ export async function ensureProjectAgents(
         template_key: template.key,
         created_at: new Date().toISOString(),
       });
+      // Also idempotent: keep this agent's skill allowlist empty so prompt
+      // size doesn't drift back up after an OpenClaw upgrade re-adds default
+      // skills. See setEmptySkillAllowlist for why.
+      await setEmptySkillAllowlist(name);
       existed.push(name);
       continue;
     }
@@ -276,6 +280,7 @@ export async function ensureProjectAgents(
         template_key: template.key,
         created_at: new Date().toISOString(),
       });
+      await setEmptySkillAllowlist(name);
       created.push(name);
     } catch (err) {
       // Surface but don't crash the loop; partial provisioning recoverable on retry.
@@ -406,6 +411,116 @@ const STUB_HEARTBEAT_MD = `# Heartbeat
 Empty by design — heartbeats are disabled. Cron-driven check-ins
 arrive as normal "(task assignment)" turns instead.
 `;
+
+/**
+ * Read this agent's skill allowlist from `~/.openclaw/openclaw.json`. Returns
+ * the array as stored (including an empty array, which is the "block all"
+ * sentinel) or `undefined` when the agent entry has no `skills` field
+ * (OpenClaw's default = "no per-agent filter").
+ *
+ * Why this exists alongside the gateway's `skills.status` RPC: that RPC
+ * doesn't differentiate empty allowlist from absent allowlist on its
+ * response payload, even though the runtime session loader and the
+ * `openclaw skills check` CLI both honor the difference. So the UI can't
+ * rely on the RPC alone to tell the user "this agent sees zero skills."
+ * Reading the source-of-truth JSON gives us an honest answer for the
+ * Skills page header + per-row "excluded for this agent" badges.
+ */
+export async function readAgentSkillAllowlist(
+  agent_id: string,
+): Promise<string[] | undefined> {
+  const cfgPath = join(
+    process.env.OPENCLAW_HOME ?? join(homedir(), ".openclaw"),
+    "openclaw.json",
+  );
+  let raw: string;
+  try {
+    raw = await readFile(cfgPath, "utf8");
+  } catch {
+    return undefined;
+  }
+  let cfg: { agents?: { list?: Array<{ id?: string; skills?: string[] }> } };
+  try {
+    cfg = JSON.parse(raw) as typeof cfg;
+  } catch {
+    return undefined;
+  }
+  const entry = cfg.agents?.list?.find((a) => a?.id === agent_id);
+  return Array.isArray(entry?.skills) ? entry.skills : undefined;
+}
+
+/**
+ * Set this agent's skill allowlist to `[]` inside `~/.openclaw/openclaw.json`.
+ *
+ * Why: OpenClaw bundles a 50+ skill catalog aimed at general-purpose
+ * assistants (1password, apple-notes, blogwatcher, camsnap, discord,
+ * gh-issues, healthcheck, slack, voice-call, etc.). When an agent has no
+ * `skills` field on its config entry, the default is "all visible-by-
+ * default skills are loaded" — which dumps the entire catalog into the
+ * system prompt's nonProjectContext (~5 KB of names + descriptions plus
+ * whatever each skill's instructions are). None of those apply to a
+ * marketing CMO/specialist whose entire tool surface is the orchestration
+ * MCP + the relevant domain MCP (Google Ads, GSC). Setting `skills: []`
+ * tells OpenClaw "this agent is allowed to see zero skills" so the catalog
+ * stops getting injected for this agent.
+ *
+ * We can't pipe this through `openclaw agents add` — there's no
+ * `--skills` flag. The supported escape hatch is `openclaw config patch`
+ * via dot/bracket paths, but those need numeric indices into
+ * `agents.list[]` which shift as agents come and go. A direct
+ * read-modify-write of the JSON file is the most robust option for what
+ * is functionally a single field flip on a known id, and it's idempotent
+ * (re-runs are no-ops once the field is already `[]`).
+ *
+ * Failure is non-fatal: if openclaw.json is missing, the agent entry
+ * isn't there yet, or the write throws, we log and continue. The agent
+ * will work — it just won't get the prompt-size benefit until next
+ * provision.
+ */
+async function setEmptySkillAllowlist(agent_id: string): Promise<void> {
+  const cfgPath = join(
+    process.env.OPENCLAW_HOME ?? join(homedir(), ".openclaw"),
+    "openclaw.json",
+  );
+  let raw: string;
+  try {
+    raw = await readFile(cfgPath, "utf8");
+  } catch (err) {
+    console.warn(
+      `[provision] couldn't read ${cfgPath} to set skills:[] for ${agent_id}:`,
+      err,
+    );
+    return;
+  }
+  let cfg: { agents?: { list?: Array<{ id?: string; skills?: string[] }> } };
+  try {
+    cfg = JSON.parse(raw) as typeof cfg;
+  } catch (err) {
+    console.warn(
+      `[provision] couldn't parse ${cfgPath} to set skills:[] for ${agent_id}:`,
+      err,
+    );
+    return;
+  }
+  const entry = cfg.agents?.list?.find((a) => a?.id === agent_id);
+  if (!entry) {
+    // Race: OpenClaw hasn't flushed the new agent to the config yet.
+    // Skip — the field can be backfilled on the next provision call.
+    return;
+  }
+  if (Array.isArray(entry.skills) && entry.skills.length === 0) {
+    return; // already empty; no write needed
+  }
+  entry.skills = [];
+  try {
+    await writeFile(cfgPath, JSON.stringify(cfg, null, 2), "utf8");
+  } catch (err) {
+    console.warn(
+      `[provision] couldn't write ${cfgPath} to set skills:[] for ${agent_id}:`,
+      err,
+    );
+  }
+}
 
 /**
  * Overwrite the OpenClaw-default workspace files with minimal stubs.

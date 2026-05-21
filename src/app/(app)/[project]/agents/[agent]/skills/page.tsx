@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { getProject } from "@/server/db/projects";
 import { resolveAgentBySlug } from "@/server/agent-meta";
+import { readAgentSkillAllowlist } from "@/server/agent-templates";
 import { getSkillStatus } from "@/server/openclaw/gateway-rpc";
 import { SkillsList } from "@/components/skills-list";
 
@@ -27,6 +28,12 @@ export default async function AgentSkillsPage({
     error = err instanceof Error ? err.message : String(err);
   }
 
+  // Source-of-truth read for the per-agent allowlist. The gateway RPC
+  // returns `agentSkillFilter: []` for both "empty allowlist" (block all)
+  // and "no allowlist" (allow all), which makes the UI lie. Pull from
+  // openclaw.json directly so the page can distinguish the two.
+  const allowlist = await readAgentSkillAllowlist(agentFullId);
+
   const skills = report?.skills ?? [];
 
   return (
@@ -36,9 +43,11 @@ export default async function AgentSkillsPage({
           <h2 className="text-lg font-semibold tracking-tight">Skills</h2>
           <p className="text-sm text-muted-foreground">
             Capabilities OpenClaw exposes to {resolved.display_name}.
-            {report?.agentSkillFilter?.length
-              ? ` Filtered to this agent's allowlist (${report.agentSkillFilter.length}).`
-              : " Workspace-wide; no per-agent filter."}
+            {allowlist === undefined
+              ? " Workspace-wide; no per-agent filter."
+              : allowlist.length === 0
+                ? " This agent has an empty allowlist — the model sees zero skills."
+                : ` This agent's allowlist permits ${allowlist.length} skill${allowlist.length === 1 ? "" : "s"}.`}
           </p>
         </header>
 
@@ -60,7 +69,11 @@ export default async function AgentSkillsPage({
         )}
 
         {!error && skills.length > 0 && (
-          <SkillsList skills={skills} agentSlug={agentSlug} />
+          <SkillsList
+            skills={skills}
+            agentSlug={agentSlug}
+            agentAllowlist={allowlist}
+          />
         )}
       </div>
     </div>
