@@ -28,7 +28,11 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Markdown } from "@/components/markdown";
 import { RunningDot } from "@/components/running-dot";
-import { BeamingGlyph, BeamingHeadline } from "@/components/beaming-indicator";
+import {
+  WorkingIndicator,
+  type WorkingMood,
+  type WorkingPhase,
+} from "@/components/working-indicator";
 import { SlashCommandPopover } from "@/components/slash-command-popover";
 import { cn } from "@/lib/utils";
 import {
@@ -502,7 +506,7 @@ export function LiveTranscript({
                   {blockedReason ? (
                     <BlockedStatus reason={blockedReason} />
                   ) : (
-                    <WorkingStatus
+                    <LiveWorkingIndicator
                       agentDisplayName={agentDisplayName}
                       events={events}
                       turnStartedAt={turnStartedAt}
@@ -1040,16 +1044,21 @@ function BlockedStatus({ reason }: { reason: string }) {
 }
 
 /**
- * Live "agent is working" indicator. Beyond just a pulse, surfaces:
- *   - what phase we're in (starting / thinking / wrapping up / running a tool)
- *   - the last tool the agent ran (so the user sees forward motion)
- *   - elapsed time since the most recent transcript event (ticks every 1s)
- *   - cumulative tool count so far
+ * LiveWorkingIndicator — the bottom-anchored "agent is working" card.
  *
- * Falls back to a bare pulse when we have nothing more useful to say (e.g.
- * the SSE composer-send case where transcript events haven't landed yet).
+ * Wraps the presentational WorkingIndicator with the project-specific
+ * logic: derive headline/subtitle/mood/phases from a mix of SSE-leading
+ * pending state and JSONL-trailing committed events, then drive the
+ * 1Hz elapsed counter. Kept inside live-transcript so the derivation
+ * has the full union of TranscriptEvent + ToolEntry types in scope
+ * without exporting either across the module boundary.
+ *
+ * Replaces the old WorkingStatus that paired a small cyan ✳ with
+ * cycling verbs (Pondering / Cogitating / Effervescing …). The new
+ * indicator carries the same information in a denser, more vivid
+ * layout — see working-indicator.tsx for the visual treatment.
  */
-function WorkingStatus({
+function LiveWorkingIndicator({
   agentDisplayName,
   events,
   turnStartedAt,
@@ -1059,35 +1068,9 @@ function WorkingStatus({
 }: {
   agentDisplayName: string;
   events: TranscriptEvent[];
-  /**
-   * Wallclock when the current send/turn began. When present and more
-   * recent than the latest event's ts, drives the elapsed counter — keeps
-   * "elapsed" from showing the gap-since-the-previous-turn while the new
-   * turn's first event hasn't been written to JSONL yet.
-   */
   turnStartedAt: number | null;
-  /**
-   * Most recent OpenClaw lifecycle phase (e.g. "run.start", "warming",
-   * "compacting") for the in-flight turn. Used to give the user a more
-   * specific status than "thinking…" during the pre-first-token wait,
-   * which is the dominant chunk of latency for kickoffs against codex/
-   * gpt-5.5 with a multi-KB system prompt.
-   */
   lifecyclePhase?: string | null;
-  /**
-   * Tool calls streamed via the active SSE connection. These can lead the
-   * committed JSONL `events` list by a few seconds (the file is buffered
-   * per turn in codex-app-server mode), so consulting both gives us a
-   * more accurate "what's the agent doing right now?" headline while the
-   * indicator sits at the bottom of the transcript.
-   */
   pendingTools?: ToolEntry[];
-  /**
-   * True when the active SSE stream has emitted at least one assistant
-   * text delta — indicates the model is currently writing its response.
-   * Drives a "Writing the response…" headline so the indicator's caption
-   * matches what the user is watching scroll in above it.
-   */
   hasPendingAssistant?: boolean;
 }) {
   const [now, setNow] = useState<number>(() => Date.now());
@@ -1096,97 +1079,18 @@ function WorkingStatus({
     return () => clearInterval(id);
   }, []);
 
+  const view = deriveWorkingView({
+    agentDisplayName,
+    events,
+    lifecyclePhase: lifecyclePhase ?? null,
+    pendingTools: pendingTools ?? [],
+    hasPendingAssistant: hasPendingAssistant ?? false,
+  });
+
+  // Anchor elapsed to whichever is later: the turn-start wallclock the
+  // composer recorded, or the last event's timestamp. Keeps the counter
+  // honest during the SSE-only window where events are still empty.
   const lastEvent = events.length > 0 ? events[events.length - 1] : null;
-  const lastToolResult = [...events]
-    .reverse()
-    .find((e): e is Extract<TranscriptEvent, { kind: "tool_result" }> =>
-      e.kind === "tool_result",
-    );
-  const inFlightToolCall = (() => {
-    // Last tool_call with no later tool_result for the same id. ToolGroup
-    // already shows this with a spinner — we mirror it here only when it's
-    // the latest event so the working pulse reflects the same thing.
-    if (!lastEvent || lastEvent.kind !== "tool_call") return null;
-    const matched = events.some(
-      (e) => e.kind === "tool_result" && e.tool_call_id === lastEvent.tool_call_id,
-    );
-    return matched ? null : lastEvent;
-  })();
-  const toolsRun = events.reduce(
-    (n, e) => n + (e.kind === "tool_result" ? 1 : 0),
-    0,
-  );
-
-  // Pick the strongest "what's happening right now" signal across SSE
-  // pending state (leads) and committed JSONL events (trails). During SSE
-  // streaming, pendingTools / pendingAssistant know the truth seconds
-  // before the file flushes. After polling catches up, `events` reflects
-  // the same content. Either way the indicator at the bottom of the
-  // transcript stays accurate.
-  const pendingInFlightTool =
-    pendingTools && pendingTools.length > 0
-      ? pendingTools.find((t) => !t.done) ?? null
-      : null;
-  const pendingLastDoneTool =
-    !pendingInFlightTool && pendingTools && pendingTools.length > 0
-      ? [...pendingTools].reverse().find((t) => t.done) ?? null
-      : null;
-
-  // Two display modes:
-  //   - `beam`: cycle through "Pondering… / Cogitating… / Beaming…" verbs
-  //     with a morphing ✳ glyph. Used whenever we have nothing more
-  //     specific to say (pre-first-token wait, between tool calls). This
-  //     keeps the chat visibly alive during the 10-20s Codex pause that
-  //     used to read as "stuck".
-  //   - `static`: render a fixed headline + subtitle (specific tool in
-  //     flight, currently writing the response, last tool result, wrapping
-  //     up assistant text). The specific info is more useful than a quirky
-  //     verb, so we keep it.
-  //
-  // The leading glyph is morphing in both modes so the eye always has
-  // something animating.
-  let mode: "beam" | "static" = "beam";
-  let headline: string = `${agentDisplayName} is thinking…`;
-  let subtitle: string | null = null;
-  let beamPrefix: string | null = agentDisplayName;
-  if (pendingInFlightTool) {
-    // SSE-derived in-flight tool wins: most accurate live signal.
-    mode = "static";
-    headline = `Calling ${formatToolName(pendingInFlightTool.name)}…`;
-    subtitle = pendingInFlightTool.label ?? null;
-  } else if (hasPendingAssistant) {
-    // Model is currently emitting assistant text via SSE. Match the user's
-    // experience — they're watching text scroll in above the indicator.
-    mode = "static";
-    headline = `${agentDisplayName} is writing the response…`;
-    subtitle = pendingLastDoneTool
-      ? `Last step · ${formatToolName(pendingLastDoneTool.name)} ${pendingLastDoneTool.ok ? "✓" : "failed"}`
-      : null;
-  } else if (!lastEvent || lastEvent.kind === "user_message" || lastEvent.kind === "unknown") {
-    // Pre-first-event window — typical kickoff wait. Use the gateway
-    // lifecycle hint as the subtitle so power users see "calling the
-    // model…" but the headline still gets the Beaming treatment.
-    mode = "beam";
-    beamPrefix = agentDisplayName;
-    const lifecycleSummary = lifecyclePhase
-      ? humanLifecyclePhase(lifecyclePhase)
-      : null;
-    subtitle = lifecycleSummary ?? "Delivering the brief to OpenClaw.";
-  } else if (inFlightToolCall) {
-    mode = "static";
-    headline = `Calling ${formatToolName(inFlightToolCall.name)}…`;
-    subtitle = inFlightToolCall.label ?? null;
-  } else if (lastEvent.kind === "tool_result") {
-    mode = "beam";
-    beamPrefix = agentDisplayName;
-    subtitle = lastEvent.ok
-      ? `Last step · ${formatToolName(lastEvent.name)} ✓`
-      : `Last step · ${formatToolName(lastEvent.name)} failed — retrying`;
-  } else if (lastEvent.kind === "assistant_text") {
-    mode = "static";
-    headline = `${agentDisplayName} is wrapping up…`;
-  }
-
   const anchorTs = (() => {
     const lastTs = lastEvent?.ts ?? null;
     if (turnStartedAt && lastTs) return Math.max(turnStartedAt, lastTs);
@@ -1195,58 +1099,198 @@ function WorkingStatus({
   const elapsedMs = anchorTs != null ? Math.max(0, now - anchorTs) : null;
 
   return (
-    <div className="flex items-start gap-2.5 rounded-md border border-dashed border-muted-foreground/25 bg-muted/10 px-3 py-2 text-xs">
-      <span className="mt-0.5">
-        <BeamingGlyph />
-      </span>
-      <div className="min-w-0 flex-1 space-y-0.5">
-        <div className="flex items-baseline gap-2">
-          {mode === "beam" ? (
-            <BeamingHeadline prefix={beamPrefix} />
-          ) : (
-            <span className="italic text-muted-foreground">{headline}</span>
-          )}
-          {elapsedMs != null && (
-            <span className="tabular-nums text-[10px] text-muted-foreground/70">
-              {formatElapsed(elapsedMs)}
-            </span>
-          )}
-        </div>
-        {(subtitle || toolsRun > 0) && (
-          <div className="flex min-w-0 items-center gap-1.5 text-[10px] text-muted-foreground/80">
-            {subtitle && (
-              <span className="truncate font-mono">{subtitle}</span>
-            )}
-            {subtitle && toolsRun > 0 && <span aria-hidden>·</span>}
-            {toolsRun > 0 && (
-              <span className="tabular-nums">
-                {toolsRun} tool{toolsRun === 1 ? "" : "s"} run
-              </span>
-            )}
-            {!subtitle && lastToolResult && toolsRun > 0 && (
-              <>
-                <span aria-hidden>·</span>
-                <span className="truncate font-mono">
-                  last · {formatToolName(lastToolResult.name)}
-                </span>
-              </>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
+    <WorkingIndicator
+      agentDisplayName={agentDisplayName}
+      headline={view.headline}
+      subtitle={view.subtitle}
+      phases={view.phases}
+      mood={view.mood}
+      elapsedMs={elapsedMs}
+    />
   );
 }
 
-function formatElapsed(ms: number): string {
-  if (ms < 1500) return "just now";
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  const rem = s % 60;
-  if (m < 60) return rem === 0 ? `${m}m` : `${m}m ${rem}s`;
-  const h = Math.floor(m / 60);
-  return `${h}h ${m % 60}m`;
+type WorkingView = {
+  headline: string;
+  subtitle: string | null;
+  phases: WorkingPhase[];
+  mood: WorkingMood;
+};
+
+/**
+ * Build the visible state for the working indicator from the current
+ * SSE pending state + committed JSONL events.
+ *
+ * Precedence (most-specific first):
+ *   1. An SSE-pending tool start that hasn't reported a result → that's
+ *      the active phase, mood "tool".
+ *   2. An SSE-pending assistant text stream → mood "writing".
+ *   3. No events yet (pre-first-token kickoff wait) → mood "waiting"
+ *      with the gateway lifecycle hint as subtitle.
+ *   4. A committed in-flight tool_call → mood "tool" (polling caught up
+ *      before the SSE state did, e.g. on rejoin from another tab).
+ *   5. Last committed event is a tool_result → mood "waiting".
+ *   6. Last committed event is assistant_text → mood "wrapping".
+ *
+ * Phases are derived from BOTH sources so the trajectory chips include
+ * recent SSE tools the JSONL hasn't seen yet, then dedupe by tool name.
+ */
+function deriveWorkingView(input: {
+  agentDisplayName: string;
+  events: TranscriptEvent[];
+  lifecyclePhase: string | null;
+  pendingTools: ToolEntry[];
+  hasPendingAssistant: boolean;
+}): WorkingView {
+  const { agentDisplayName, events, lifecyclePhase, pendingTools, hasPendingAssistant } = input;
+  const lastEvent = events.length > 0 ? events[events.length - 1] : null;
+  const pendingInFlightTool = pendingTools.find((t) => !t.done) ?? null;
+  const inFlightCommittedToolCall: Extract<
+    TranscriptEvent,
+    { kind: "tool_call" }
+  > | null = (() => {
+    if (!lastEvent || lastEvent.kind !== "tool_call") return null;
+    const matched = events.some(
+      (e) => e.kind === "tool_result" && e.tool_call_id === lastEvent.tool_call_id,
+    );
+    return matched ? null : lastEvent;
+  })();
+  const phases = buildPhases(events, pendingTools);
+
+  if (pendingInFlightTool) {
+    return {
+      headline: `Calling ${formatToolName(pendingInFlightTool.name)}`,
+      subtitle: pendingInFlightTool.label ?? null,
+      phases,
+      mood: "tool",
+    };
+  }
+  if (hasPendingAssistant) {
+    return {
+      headline: "Writing the response",
+      subtitle: subtitleForLastTool(pendingTools, events),
+      phases,
+      mood: "writing",
+    };
+  }
+  if (!lastEvent || lastEvent.kind === "user_message" || lastEvent.kind === "unknown") {
+    const lifecycleSummary = lifecyclePhase
+      ? humanLifecyclePhase(lifecyclePhase)
+      : null;
+    return {
+      headline: `${agentDisplayName} is starting`,
+      subtitle: lifecycleSummary ?? "Delivering the brief to OpenClaw",
+      phases,
+      mood: "waiting",
+    };
+  }
+  if (inFlightCommittedToolCall) {
+    return {
+      headline: `Calling ${formatToolName(inFlightCommittedToolCall.name)}`,
+      subtitle: inFlightCommittedToolCall.label ?? null,
+      phases,
+      mood: "tool",
+    };
+  }
+  if (lastEvent.kind === "tool_result") {
+    return {
+      headline: `${agentDisplayName} is thinking`,
+      subtitle: lastEvent.ok
+        ? `${formatToolName(lastEvent.name)} ✓ — picking next step`
+        : `${formatToolName(lastEvent.name)} failed — retrying`,
+      phases,
+      mood: "waiting",
+    };
+  }
+  // assistant_text
+  return {
+    headline: "Wrapping up",
+    subtitle: subtitleForLastTool(pendingTools, events),
+    phases,
+    mood: "wrapping",
+  };
+}
+
+function subtitleForLastTool(
+  pendingTools: ToolEntry[],
+  events: TranscriptEvent[],
+): string | null {
+  const lastDonePending = [...pendingTools].reverse().find((t) => t.done);
+  if (lastDonePending) {
+    return `${formatToolName(lastDonePending.name)} ${lastDonePending.ok ? "✓" : "failed"}`;
+  }
+  const lastDoneCommitted = [...events]
+    .reverse()
+    .find((e): e is Extract<TranscriptEvent, { kind: "tool_result" }> =>
+      e.kind === "tool_result",
+    );
+  if (lastDoneCommitted) {
+    return `${formatToolName(lastDoneCommitted.name)} ${lastDoneCommitted.ok ? "✓" : "failed"}`;
+  }
+  return null;
+}
+
+/**
+ * Build the trajectory pills shown in the indicator. Order:
+ *   1. Committed tools (in order, deduped by tool_call_id).
+ *   2. SSE-pending tools not yet in the committed list.
+ * The last entry is the "active" one. Done entries get a check, the
+ * active one gets the mood-colored ring + wrench glyph.
+ */
+function buildPhases(
+  events: TranscriptEvent[],
+  pendingTools: ToolEntry[],
+): WorkingPhase[] {
+  const seen = new Set<string>();
+  const phases: WorkingPhase[] = [];
+
+  // Walk committed events to build phases in order.
+  const committedById = new Map<
+    string,
+    { name: string; done: boolean; ok: boolean }
+  >();
+  for (const e of events) {
+    if (e.kind === "tool_call") {
+      committedById.set(e.tool_call_id, { name: e.name, done: false, ok: true });
+    } else if (e.kind === "tool_result") {
+      const prev = committedById.get(e.tool_call_id);
+      if (prev) {
+        prev.done = true;
+        prev.ok = e.ok;
+      } else {
+        committedById.set(e.tool_call_id, { name: e.name, done: true, ok: e.ok });
+      }
+    }
+  }
+  for (const [id, t] of committedById) {
+    seen.add(id);
+    phases.push({
+      id,
+      label: formatToolName(t.name),
+      state: !t.done ? "active" : t.ok ? "done" : "failed",
+    });
+  }
+
+  // Then any SSE-pending tools the committed list doesn't have yet.
+  for (const t of pendingTools) {
+    if (seen.has(t.toolCallId)) continue;
+    phases.push({
+      id: t.toolCallId,
+      label: formatToolName(t.name),
+      state: !t.done ? "active" : t.ok ? "done" : "failed",
+      detail: t.label ?? null,
+    });
+  }
+
+  // If multiple phases are flagged "active" (shouldn't happen, but defend),
+  // demote all but the last so the visual stays clear.
+  let lastActive = -1;
+  for (let i = 0; i < phases.length; i++) {
+    if (phases[i]!.state === "active") lastActive = i;
+  }
+  return phases.map((p, i) =>
+    p.state === "active" && i !== lastActive ? { ...p, state: "done" } : p,
+  );
 }
 
 /**

@@ -96,10 +96,11 @@ describe("LiveTranscript empty state", () => {
     expect(
       screen.queryByText(/no messages yet/i),
     ).not.toBeInTheDocument();
-    // WorkingStatus shows BeamingHeadline in "beam" mode (no specific
-    // tool/lifecycle info yet). The agent prefix is rendered alongside
-    // a cycling verb; assert on the prefix since the verb rotates.
-    expect(screen.getByText(/CMO/)).toBeInTheDocument();
+    // WorkingIndicator renders the agent display name as the accent
+    // header. With no events yet, mood is "waiting" and the headline
+    // is "<agent> is starting".
+    expect(screen.getByText("CMO")).toBeInTheDocument();
+    expect(screen.getByText(/is starting/i)).toBeInTheDocument();
   });
 });
 

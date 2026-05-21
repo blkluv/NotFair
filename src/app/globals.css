@@ -88,6 +88,56 @@
   }
 }
 
+/* ────────────────────────────────────────────────────────────────────
+   WorkingIndicator animations.
+
+   Four custom keyframes drive the live "agent is working" card in the
+   chat. Each is intentionally narrow in scope so the indicator reads
+   as one coordinated piece rather than a jittery collection of
+   independent loops.
+
+   - aurora-sweep:  thin gradient bar travels L→R across the top edge.
+                    Establishes "alive" without taking attention. Slow.
+   - shimmer-bar:   identical pattern at the bottom edge, slightly
+                    faster + thinner, creates a sense of forward motion
+                    when the model is between events.
+   - heartbeat:     two-stage scale on the mood dot — a quick squeeze
+                    followed by a soft swell, ~1.4s cycle. Reads as
+                    a living pulse rather than a steady spinner.
+   - phase-glow:    subtle glow + lift on the currently-active phase
+                    chip. Repeats at 2s so it's clearly the active one.
+   ──────────────────────────────────────────────────────────────────── */
+
+@keyframes aurora-sweep {
+  0%   { transform: translateX(-110%); opacity: 0.4; }
+  50%  { opacity: 1; }
+  100% { transform: translateX(220%); opacity: 0.4; }
+}
+
+@keyframes shimmer-bar {
+  0%   { transform: translateX(-120%); }
+  100% { transform: translateX(260%); }
+}
+
+@keyframes heartbeat {
+  0%, 100% { transform: scale(0.92); opacity: 0.85; }
+  20%      { transform: scale(1.18); opacity: 1; }
+  35%      { transform: scale(0.96); opacity: 0.9; }
+  60%      { transform: scale(1.08); opacity: 1; }
+}
+
+@keyframes phase-glow {
+  0%, 100% { box-shadow: 0 0 0 0 currentColor; }
+  50%      { box-shadow: 0 0 0 4px transparent; }
+}
+
+@theme inline {
+  --animate-aurora-sweep: aurora-sweep 2.6s linear infinite;
+  --animate-shimmer-bar: shimmer-bar 1.8s ease-in-out infinite;
+  --animate-heartbeat: heartbeat 1.4s ease-in-out infinite;
+  --animate-phase-glow: phase-glow 2s ease-in-out infinite;
+}
+
 :root {
   --sidebar: hsl(0 0% 98%);
   --sidebar-foreground: hsl(240 5.3% 26.1%);
