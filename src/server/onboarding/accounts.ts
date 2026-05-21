@@ -199,25 +199,25 @@ export async function setOnboardingAccountAction(
   const existingAudit = allTasks.find(
     (t) => t.agent_id === cmoAgentId && t.title?.startsWith("Audit the account"),
   );
-  let task = existingAudit;
-  if (!task) {
-    // Find the project-onboarding task to gate on. Match by exact title
-    // (createProjectForOnboardingAction uses a fixed string from
-    // buildProjectOnboardingBrief). When it's missing or already terminal,
-    // createTask drops the blocker automatically — the audit runs
-    // immediately in that case.
-    const onboardingTask = allTasks.find(
-      (t) =>
-        t.agent_id === cmoAgentId &&
-        t.title === "Learn the project and write PROJECT.md",
-    );
+  // Find the project-onboarding task. Created synchronously by
+  // createProjectForOnboardingAction; should always exist by the time
+  // the user gets here.
+  const onboardingTask = allTasks.find(
+    (t) =>
+      t.agent_id === cmoAgentId &&
+      t.title === "Learn the project and write PROJECT.md",
+  );
 
+  let audit = existingAudit;
+  if (!audit) {
+    // When the onboarding task is missing or already terminal, createTask
+    // drops the blocker automatically — the audit runs immediately.
     const { title, brief, success_criteria } = buildOnboardingBrief({
       project_slug,
       project_display_name: updated.display_name,
       google_ads_account_id: match.id,
     });
-    task = createTask({
+    audit = createTask({
       project_slug,
       agent_id: cmoAgentId,
       title,
@@ -229,23 +229,22 @@ export async function setOnboardingAccountAction(
     });
   }
 
-  // Status now:
-  //   - If onboarding task was non-terminal at createTask time → audit is
-  //     `blocked`. The propagation hook in handleTaskStatus picks it up
-  //     when onboarding flips to `done`.
-  //   - Otherwise → audit is `proposed`. The task workspace the caller
-  //     redirects the user to auto-fires the kickoff client-side via
-  //     /api/chat (which atomically claims). For the resubmit branch
-  //     (audit already running/done) /api/chat is a safe no-op.
+  // Pick the task to surface in the redirect:
+  //   - Prefer the onboarding task while it's still non-terminal — that's
+  //     what's actually executing; the audit sits blocked behind it.
+  //   - Fall back to the audit when onboarding is already done (or never
+  //     existed) so the user lands on the running task either way.
+  const TERMINAL = new Set(["done", "failed", "cancelled"]);
+  const surfaceTask =
+    onboardingTask && !TERMINAL.has(onboardingTask.status)
+      ? onboardingTask
+      : audit;
 
-  // The CMO's URL slug was already resolved above (via listProjectAgents);
-  // hand it to the client so the redirect uses the role-name path without
-  // the client computing anything itself.
   revalidatePath("/", "layout");
   return {
     ok: true,
     project: updated,
-    task_display_id: task.display_id,
+    task_display_id: surfaceTask.display_id,
     cmo_agent_slug: cmo.slug,
   };
 }

@@ -31,7 +31,7 @@ vi.mock("@/server/db/agent-actions", () => ({
 // scheduleCronAction looks up the agent's full id from the project's
 // agent roster — the id encodes the personal name now, so we can't
 // synthesize it from template key alone.
-const listProjectAgentsMock = vi.fn(async () => [
+const listProjectAgentsMock = vi.fn(async (..._a: unknown[]) => [
   {
     agent_id: "demo-cmo-greg",
     slug: "cmo-greg",

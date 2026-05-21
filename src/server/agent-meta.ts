@@ -91,21 +91,25 @@ export type ProjectAgentEntry = {
  *   before `ensureProjectAgents` runs.
  */
 export async function listProjectAgents(project_slug: string): Promise<ProjectAgentEntry[]> {
-  const result = new Map<string, ProjectAgentEntry>();
+  // Two-phase merge:
+  //   - Template agents are deduplicated by template_key. The agent_id
+  //     encodes the personal name (e.g. demo-cmo-greg), so the seed and
+  //     the overlay COULD disagree on the id if the on-disk sidecar still
+  //     uses an older naming. Keying by template_key prevents that from
+  //     showing two CMO entries in the sidebar.
+  //   - Cloned/custom agents (no template_key) key by their agent_id since
+  //     a project may have many of them.
+  const byRole = new Map<string, ProjectAgentEntry>();
+  const byAgentId = new Map<string, ProjectAgentEntry>();
 
   // 1) Seed with the templates an onboarded project actually has. Opt-in
   //    templates (e.g. SEO until v1.1 lights it up) live in TEMPLATES but
   //    are NOT pre-seeded — they only appear when a meta sidecar shows
-  //    one was actually provisioned. This is how we keep the sidebar from
-  //    pretending SEO exists when the onboarding scope is cmo+google-ads.
+  //    one was actually provisioned.
   for (const t of TEMPLATES) {
     if (!t.default_onboarding) continue;
-    // Placeholder entry shown before a meta sidecar exists on disk.
-    // Both the agent_id and the URL slug encode the template's
-    // default_name; the moment ensureProjectAgents writes a sidecar
-    // with the user-chosen name, the overlay below replaces this row.
     const agentId = agentNameFor(project_slug, t.key, t.default_name);
-    result.set(agentId, {
+    byRole.set(t.key, {
       agent_id: agentId,
       slug: agentUrlSlug(t.key, t.default_name),
       name: t.default_name,
@@ -123,31 +127,44 @@ export async function listProjectAgents(project_slug: string): Promise<ProjectAg
     entries = await readdir(agentsRoot);
   } catch {
     // No agents dir yet — keep templates-only view.
-    return Array.from(result.values());
+    return Array.from(byRole.values());
   }
   const prefix = `${project_slug}-`;
   for (const entry of entries) {
     if (!entry.startsWith(prefix)) continue;
     const meta = readAgentMeta(entry);
     if (!meta) continue;
-    // Template agents: slug is COMPUTED from template_key + name; we
-    //   ignore any stored slug (templates don't write one).
-    // Cloned/custom: slug came from the sidecar (clone-agent writes it).
     const template = meta.template_key
       ? TEMPLATES.find((t) => t.key === meta.template_key)
       : undefined;
-    const slug = template
-      ? agentUrlSlug(template.key, meta.name)
-      : meta.slug ?? slugifyForCustom(meta.name);
-    result.set(meta.agent_id, {
-      agent_id: meta.agent_id,
-      slug,
-      name: meta.name,
-      template_key: meta.template_key,
-      source_agent_id: meta.source_agent_id,
-      is_template_default: false,
-    });
+    if (template) {
+      // Template agent: replace the seed row keyed by role.
+      const slug = agentUrlSlug(template.key, meta.name);
+      byRole.set(template.key, {
+        agent_id: meta.agent_id,
+        slug,
+        name: meta.name,
+        template_key: meta.template_key,
+        source_agent_id: meta.source_agent_id,
+        is_template_default: false,
+      });
+    } else {
+      // Cloned/custom agent: key by agent_id.
+      const slug = meta.slug ?? slugifyForCustom(meta.name);
+      byAgentId.set(meta.agent_id, {
+        agent_id: meta.agent_id,
+        slug,
+        name: meta.name,
+        template_key: undefined,
+        source_agent_id: meta.source_agent_id,
+        is_template_default: false,
+      });
+    }
   }
+
+  const result = new Map<string, ProjectAgentEntry>();
+  for (const v of byRole.values()) result.set(v.agent_id, v);
+  for (const v of byAgentId.values()) result.set(v.agent_id, v);
 
   // Stable order: templates first (in declared order), then custom by slug.
   const templateOrder = new Map(TEMPLATES.map((t, i) => [t.key, i]));
