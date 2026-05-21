@@ -1209,18 +1209,17 @@ function deriveWorkingView(input: {
     };
   }
   if (!lastEvent || lastEvent.kind === "user_message" || lastEvent.kind === "unknown") {
-    // Agent name is rendered separately as the accent prefix in the
-    // indicator, so headlines stay tight + verb-only here. Subtitle
-    // is only set when the gateway has told us a concrete phase —
-    // otherwise we just say "Starting" without a redundant restatement
-    // ("Delivering the brief to OpenClaw" was both jargony and said
-    // the same thing as the headline, which read as contradictory).
+    // The gateway lifecycle phase IS the status when it arrives — showing
+    // "Starting" with a "Calling the model" subtitle stacked two
+    // contradictory descriptions of the same moment. Promote whichever
+    // signal we have to the headline; the generic "Starting" only fires
+    // before any lifecycle event lands.
     const lifecycleSummary = lifecyclePhase
       ? humanLifecyclePhase(lifecyclePhase)
       : null;
     return {
-      headline: "Starting",
-      subtitle: lifecycleSummary,
+      headline: lifecycleSummary ?? "Starting",
+      subtitle: null,
       phases,
       mood: "waiting",
     };
@@ -1344,12 +1343,16 @@ function buildPhases(
  */
 function humanLifecyclePhase(phase: string): string {
   const p = phase.toLowerCase();
-  if (p.includes("warming") || p.includes("warmup")) return "warming up…";
-  if (p.includes("compact")) return "compacting context…";
+  // Capitalized + no trailing ellipsis — these strings are used as the
+  // indicator's headline now, alongside "Calling runScript" / "Thinking"
+  // / "Writing the response". BreathingDots after the headline handles
+  // the "…" affordance.
+  if (p.includes("warming") || p.includes("warmup")) return "Warming up";
+  if (p.includes("compact")) return "Compacting context";
   if (p === "start" || p.endsWith(".start") || p.includes("run.start"))
-    return "calling the model…";
-  if (p.includes("end") || p.includes("complete")) return "finishing up…";
-  return "starting up…";
+    return "Calling the model";
+  if (p.includes("end") || p.includes("complete")) return "Finishing up";
+  return "Starting up";
 }
 
 /**
