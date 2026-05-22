@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -312,35 +312,24 @@ function SelectedTaskPanel({
   // badge + sidebar in-flight counters track the DB even when nothing
   // has landed in the JSONL transcript yet.
   //
-  // Why: OpenClaw doesn't flush the JSONL file until session.ended —
-  // a long-running audit can spend minutes calling MCP tools (which
-  // update the DB synchronously) while the JSONL stays empty.
+  // Why: OpenClaw doesn't flush session.jsonl until session.ended —
+  // and even after the task flips to `done` in our DB, the flush can
+  // land seconds or minutes later (and isn't guaranteed at all if the
+  // user opens the task page after-the-fact). Auto-stopping polling
+  // on terminal status meant the transcript stayed blank until a
+  // manual refresh; even a generous grace window can't cover a flush
+  // that happens after the user navigates in.
   //
-  // Stop-polling rule: we hang on for a few empty ticks AFTER the task
-  // hits a terminal status. The JSONL flush can land AFTER the
-  // status-flip — if we stopped immediately, the transcript would stay
-  // blank until the next manual refresh. Counting empty terminal ticks
-  // and stopping only after a small grace window (~5 s at 2 s cadence)
-  // gives the flush a chance to catch up.
-  const emptyTerminalTicksRef = useRef(0);
-  const GRACE_TICKS_AFTER_TERMINAL = 3;
+  // Resolution: never auto-stop polling. Cost is cheap (one HTTP fetch
+  // every 2 s while the user is on this page), and the unmount/effect
+  // cleanup tears the timer down the moment they navigate away.
   const onPolled = useCallback(
     ({ newEvents }: { newEvents: number; fileSize: number }) => {
-      if (newEvents > 0 || isInFlight) {
-        router.refresh();
-      }
-      if (isInFlight) {
-        emptyTerminalTicksRef.current = 0;
-        return false;
-      }
-      if (newEvents > 0) {
-        // Flush landed something. Reset the grace counter — there might
-        // be more bytes coming as OpenClaw drains.
-        emptyTerminalTicksRef.current = 0;
-        return false;
-      }
-      emptyTerminalTicksRef.current += 1;
-      return emptyTerminalTicksRef.current >= GRACE_TICKS_AFTER_TERMINAL;
+      void newEvents;
+      if (isInFlight) router.refresh();
+      // Never returns true → polling continues for the lifetime of the
+      // mounted page.
+      return false;
     },
     [isInFlight, router],
   );
