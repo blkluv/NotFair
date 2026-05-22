@@ -18,11 +18,11 @@ import {
   listGoogleAdsAccounts,
   setOnboardingAccountAction,
   getOnboardingTaskForSkipAction,
-  awaitOnboardingReadyAction,
+  getProvisioningProgressAction,
   type GoogleAdsAccount,
 } from "@/server/onboarding/accounts";
 
-type Step = "name" | "connect" | "account";
+type Step = "name" | "connect" | "account" | "setup";
 
 export function OnboardingFlow() {
   const router = useRouter();
@@ -30,7 +30,9 @@ export function OnboardingFlow() {
   const stepParam = params.get("step");
   const slug = params.get("slug") ?? null;
   const step: Step =
-    stepParam === "connect" || stepParam === "account" ? stepParam : "name";
+    stepParam === "connect" || stepParam === "account" || stepParam === "setup"
+      ? stepParam
+      : "name";
 
   return (
     <div className="mx-auto w-full max-w-[720px] space-y-6 pt-8 pb-12">
@@ -50,7 +52,10 @@ export function OnboardingFlow() {
         )}
         {step === "connect" && slug && <ConnectStep slug={slug} />}
         {step === "account" && slug && <AccountStep slug={slug} />}
-        {(step === "connect" || step === "account") && !slug && <MissingSlug />}
+        {step === "setup" && slug && <SetupStep slug={slug} />}
+        {(step === "connect" || step === "account" || step === "setup") && !slug && (
+          <MissingSlug />
+        )}
       </main>
     </div>
   );
@@ -269,39 +274,10 @@ function NameStep({ onCreated }: { onCreated: (slug: string) => void }) {
 
 // ── Step 2: Connect ────────────────────────────────────────────────
 
-type ReadyState =
-  | { phase: "waiting" }
-  | { phase: "ready" }
-  | { phase: "error"; message: string };
-
 function ConnectStep({ slug }: { slug: string }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
-  const [readiness, setReadiness] = useState<ReadyState>({ phase: "waiting" });
   const connectionsHref = projectHref(slug, "/connections");
-
-  // Block the screen until `ensureProjectAgents` has finished AND the
-  // gateway's runtime config snapshot has surfaced the new agents. Without
-  // this, clicking Skip immediately after Continue races the
-  // `openclaw agents add` config write and the kickoff fails with
-  // INVALID_REQUEST "Agent '<id>' no longer exists in configuration".
-  // While we're waiting the user sees a "Setting up your agents…" card
-  // — same screen, same place, no surprising state transitions.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const r = await awaitOnboardingReadyAction(slug);
-      if (cancelled) return;
-      if (!r.ok) {
-        setReadiness({ phase: "error", message: r.error });
-        return;
-      }
-      setReadiness({ phase: "ready" });
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [slug]);
 
   async function onConnect() {
     setBusy(true);
@@ -323,31 +299,14 @@ function ConnectStep({ slug }: { slug: string }) {
     }
   }
 
-  async function onSkip() {
-    // Drop the user on the CMO's PROJECT.md onboarding task — the same
-    // workspace the connect path lands on. The kickoff already fired
-    // server-side in createProjectForOnboardingAction, so this is just a
-    // navigation: the user sees streaming events (or, if the kickoff
-    // errored, the failed-task error message — much better than the
-    // earlier "land on project home and figure it out" fallback).
-    setBusy(true);
-    try {
-      const result = await getOnboardingTaskForSkipAction(slug);
-      if (!result.ok) {
-        toast.error(result.error);
-        setBusy(false);
-        return;
-      }
-      router.replace(
-        projectHref(
-          slug,
-          `/agents/${result.cmo_agent_slug}/tasks?task=${encodeURIComponent(result.task_display_id)}`,
-        ),
-      );
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err));
-      setBusy(false);
-    }
+  function onSkip() {
+    // Hand off to the dedicated setup screen instead of redirecting
+    // straight to the task. The setup screen waits for `ensureProjectAgents`
+    // to finish (publishing per-template progress) and only then resolves
+    // the CMO + first-task slugs and navigates the user in.
+    router.replace(
+      `/onboarding?step=setup&slug=${encodeURIComponent(slug)}&from=skip`,
+    );
   }
 
   return (
@@ -364,44 +323,24 @@ function ConnectStep({ slug }: { slug: string }) {
 
       <Card>
         <CardContent className="space-y-4 pt-6">
-          {readiness.phase === "waiting" && (
-            <div
-              className="flex items-center gap-2 text-sm text-muted-foreground"
-              role="status"
-              aria-live="polite"
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={onConnect} disabled={busy} size="lg">
+              {busy ? (
+                <Loader2 className="mr-1.5 size-4 animate-spin" />
+              ) : (
+                <Plug className="mr-1.5 size-4" />
+              )}
+              Connect Google Ads
+            </Button>
+            <Button
+              onClick={onSkip}
+              variant="ghost"
+              disabled={busy}
+              aria-label="Skip Google Ads connection for now and go to CMO tasks"
             >
-              <Loader2 className="size-4 animate-spin" />
-              Setting up your agents…
-            </div>
-          )}
-          {readiness.phase === "error" && (
-            <p
-              className="text-sm text-destructive"
-              role="alert"
-            >
-              {readiness.message}
-            </p>
-          )}
-          {readiness.phase === "ready" && (
-            <div className="flex flex-wrap gap-2">
-              <Button onClick={onConnect} disabled={busy} size="lg">
-                {busy ? (
-                  <Loader2 className="mr-1.5 size-4 animate-spin" />
-                ) : (
-                  <Plug className="mr-1.5 size-4" />
-                )}
-                Connect Google Ads
-              </Button>
-              <Button
-                onClick={onSkip}
-                variant="ghost"
-                disabled={busy}
-                aria-label="Skip Google Ads connection for now and go to CMO tasks"
-              >
-                Skip for now
-              </Button>
-            </div>
-          )}
+              Skip for now
+            </Button>
+          </div>
           <p className="text-xs text-muted-foreground">
             You can disconnect anytime in{" "}
             <Link href={connectionsHref} className="underline underline-offset-2">
@@ -409,6 +348,160 @@ function ConnectStep({ slug }: { slug: string }) {
             </Link>
             .
           </p>
+        </CardContent>
+      </Card>
+    </>
+  );
+}
+
+// ── Step 2.5: Setup (post-skip-or-connect provisioning watcher) ────
+
+type ProgressStep = {
+  key: string;
+  label: string;
+  status: string;
+  error?: string;
+};
+
+function statusGlyph(status: string): string {
+  if (status === "done") return "✓";
+  if (status === "failed") return "✗";
+  if (status === "in_progress") return "•";
+  return "·";
+}
+
+function SetupStep({ slug }: { slug: string }) {
+  const router = useRouter();
+  const [steps, setSteps] = useState<ProgressStep[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const redirectedRef = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let pollTimer: ReturnType<typeof setTimeout> | null = null;
+
+    async function poll(): Promise<void> {
+      if (cancelled) return;
+      try {
+        const r = await getProvisioningProgressAction(slug);
+        if (cancelled) return;
+        if (!r.ok) {
+          setError(r.error);
+          return;
+        }
+        setSteps(r.steps);
+        if (r.overall === "failed") {
+          const failed = r.steps.find((s) => s.status === "failed");
+          setError(failed?.error ?? "Provisioning failed.");
+          return;
+        }
+        if (r.overall === "done") {
+          // Resolve the CMO + first task slugs and forward to the live
+          // task workspace. Guarded so React StrictMode's double-mount
+          // doesn't fire two redirects.
+          if (redirectedRef.current) return;
+          redirectedRef.current = true;
+          const dest = await getOnboardingTaskForSkipAction(slug);
+          if (cancelled) return;
+          if (!dest.ok) {
+            setError(dest.error);
+            redirectedRef.current = false;
+            return;
+          }
+          router.replace(
+            projectHref(
+              slug,
+              `/agents/${dest.cmo_agent_slug}/tasks?task=${encodeURIComponent(dest.task_display_id)}`,
+            ),
+          );
+          return;
+        }
+        // Still running — poll again. 500ms keeps the rows feeling
+        // alive without hammering the server.
+        pollTimer = setTimeout(poll, 500);
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    }
+
+    void poll();
+    return () => {
+      cancelled = true;
+      if (pollTimer) clearTimeout(pollTimer);
+    };
+  }, [slug, router]);
+
+  return (
+    <>
+      <header className="space-y-2">
+        <h1 className="text-3xl font-semibold tracking-tight text-foreground">
+          Setting up your agents.
+        </h1>
+        <p className="text-sm text-muted-foreground">
+          One moment — provisioning your team in OpenClaw.
+        </p>
+      </header>
+
+      <Card>
+        <CardContent className="pt-6">
+          <ul className="space-y-2" role="status" aria-live="polite">
+            {steps.length === 0 && !error && (
+              <li className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
+                Starting…
+              </li>
+            )}
+            {steps.map((s) => (
+              <li
+                key={s.key}
+                className="flex items-center gap-2 text-sm"
+                data-status={s.status}
+              >
+                <span
+                  aria-hidden
+                  className={
+                    s.status === "done"
+                      ? "inline-flex size-4 items-center justify-center font-mono text-emerald-600"
+                      : s.status === "failed"
+                        ? "inline-flex size-4 items-center justify-center font-mono text-destructive"
+                        : s.status === "in_progress"
+                          ? "inline-flex size-4 items-center justify-center"
+                          : "inline-flex size-4 items-center justify-center font-mono text-muted-foreground"
+                  }
+                >
+                  {s.status === "in_progress" ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    statusGlyph(s.status)
+                  )}
+                </span>
+                <span
+                  className={
+                    s.status === "done"
+                      ? "text-foreground"
+                      : s.status === "failed"
+                        ? "text-destructive"
+                        : s.status === "in_progress"
+                          ? "text-foreground"
+                          : "text-muted-foreground"
+                  }
+                >
+                  {s.label}
+                </span>
+                {s.error && (
+                  <span className="ml-2 text-xs text-destructive">
+                    {s.error}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+          {error && (
+            <p className="mt-4 text-sm text-destructive" role="alert">
+              {error}
+            </p>
+          )}
         </CardContent>
       </Card>
     </>

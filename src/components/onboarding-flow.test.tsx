@@ -8,7 +8,7 @@ const {
   listGoogleAdsAccounts,
   setOnboardingAccountAction,
   getOnboardingTaskForSkipAction,
-  awaitOnboardingReadyAction,
+  getProvisioningProgressAction,
   routerPush,
   routerReplace,
   toastFns,
@@ -19,7 +19,7 @@ const {
   listGoogleAdsAccounts: vi.fn(),
   setOnboardingAccountAction: vi.fn(),
   getOnboardingTaskForSkipAction: vi.fn(),
-  awaitOnboardingReadyAction: vi.fn(),
+  getProvisioningProgressAction: vi.fn(),
   routerPush: vi.fn(),
   routerReplace: vi.fn(),
   toastFns: {
@@ -44,8 +44,8 @@ vi.mock("@/server/onboarding/accounts", () => ({
     setOnboardingAccountAction(...args),
   getOnboardingTaskForSkipAction: (...args: unknown[]) =>
     getOnboardingTaskForSkipAction(...args),
-  awaitOnboardingReadyAction: (...args: unknown[]) =>
-    awaitOnboardingReadyAction(...args),
+  getProvisioningProgressAction: (...args: unknown[]) =>
+    getProvisioningProgressAction(...args),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -89,10 +89,7 @@ beforeEach(() => {
   listGoogleAdsAccounts.mockReset();
   setOnboardingAccountAction.mockReset();
   getOnboardingTaskForSkipAction.mockReset();
-  awaitOnboardingReadyAction.mockReset();
-  // Default: provisioning is ready by the time ConnectStep mounts. Tests
-  // that want the waiting-state UI override this in their setup.
-  awaitOnboardingReadyAction.mockResolvedValue({ ok: true });
+  getProvisioningProgressAction.mockReset();
   routerPush.mockReset();
   routerReplace.mockReset();
   toastFns.success.mockReset();
@@ -195,38 +192,14 @@ describe("OnboardingFlow — MissingSlug", () => {
 });
 
 describe("OnboardingFlow — ConnectStep", () => {
-  it("shows 'Setting up your agents…' until provisioning resolves", async () => {
-    awaitOnboardingReadyAction.mockReturnValue(new Promise(() => {}));
-    setStep("connect", "acme");
-    render(<OnboardingFlow />);
-    expect(screen.getByText(/Setting up your agents/i)).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /Connect Google Ads/i }),
-    ).not.toBeInTheDocument();
-  });
-
-  it("surfaces a provisioning timeout error", async () => {
-    awaitOnboardingReadyAction.mockResolvedValue({
-      ok: false,
-      error: "Setting up your agents is taking longer than expected. Refresh to retry.",
-    });
-    setStep("connect", "acme");
-    render(<OnboardingFlow />);
-    await waitFor(() =>
-      expect(
-        screen.getByText(/Setting up your agents is taking longer/i),
-      ).toBeInTheDocument(),
-    );
-  });
-
-  it("renders the connect headline + Connect/Skip buttons once ready", async () => {
+  it("renders the connect headline + Connect/Skip buttons", () => {
     setStep("connect", "acme");
     render(<OnboardingFlow />);
     expect(
       screen.getByRole("heading", { name: /Connect your Google Ads/i }),
     ).toBeInTheDocument();
     expect(
-      await screen.findByRole("button", { name: /Connect Google Ads/i }),
+      screen.getByRole("button", { name: /Connect Google Ads/i }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /Skip Google Ads/i }),
@@ -241,9 +214,7 @@ describe("OnboardingFlow — ConnectStep", () => {
     });
     setStep("connect", "acme");
     render(<OnboardingFlow />);
-    fireEvent.click(
-      await screen.findByRole("button", { name: /Connect Google Ads/i }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /Connect Google Ads/i }));
     await waitFor(() =>
       expect(startMcpConnect).toHaveBeenCalledWith({
         mcp_key: "notfair-googleads",
@@ -259,9 +230,7 @@ describe("OnboardingFlow — ConnectStep", () => {
     startMcpConnect.mockResolvedValue({ ok: false, error: "registration failed" });
     setStep("connect", "acme");
     render(<OnboardingFlow />);
-    const btn = await screen.findByRole("button", {
-      name: /Connect Google Ads/i,
-    });
+    const btn = screen.getByRole("button", { name: /Connect Google Ads/i });
     fireEvent.click(btn);
     await waitFor(() =>
       expect(toastFns.error).toHaveBeenCalledWith("registration failed"),
@@ -273,25 +242,76 @@ describe("OnboardingFlow — ConnectStep", () => {
     startMcpConnect.mockRejectedValue(new Error("offline"));
     setStep("connect", "acme");
     render(<OnboardingFlow />);
-    fireEvent.click(
-      await screen.findByRole("button", { name: /Connect Google Ads/i }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /Connect Google Ads/i }));
     await waitFor(() =>
       expect(toastFns.error).toHaveBeenCalledWith("offline"),
     );
   });
 
-  it("redirects to the CMO onboarding task when the user clicks Skip", async () => {
+  it("hands off to the setup screen when the user clicks Skip", () => {
+    setStep("connect", "acme");
+    render(<OnboardingFlow />);
+    fireEvent.click(screen.getByRole("button", { name: /Skip Google Ads/i }));
+    expect(routerReplace).toHaveBeenCalledWith(
+      "/onboarding?step=setup&slug=acme&from=skip",
+    );
+  });
+});
+
+describe("OnboardingFlow — SetupStep", () => {
+  it("renders the per-template checklist while provisioning runs", async () => {
+    getProvisioningProgressAction.mockResolvedValue({
+      ok: true,
+      overall: "running",
+      steps: [
+        { key: "cmo", label: "Setting up CMO", status: "in_progress" },
+        {
+          key: "google_ads",
+          label: "Setting up Google Ads specialist",
+          status: "pending",
+        },
+        {
+          key: "gateway",
+          label: "Connecting agents to gateway",
+          status: "pending",
+        },
+      ],
+    });
+    setStep("setup", "acme");
+    render(<OnboardingFlow />);
+    expect(
+      await screen.findByText(/Setting up CMO/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Setting up Google Ads specialist/i)).toBeInTheDocument();
+    expect(screen.getByText(/Connecting agents to gateway/i)).toBeInTheDocument();
+    expect(routerReplace).not.toHaveBeenCalled();
+  });
+
+  it("redirects to the task workspace once provisioning is done", async () => {
+    getProvisioningProgressAction.mockResolvedValue({
+      ok: true,
+      overall: "done",
+      steps: [
+        { key: "cmo", label: "Setting up CMO", status: "done" },
+        {
+          key: "google_ads",
+          label: "Setting up Google Ads specialist",
+          status: "done",
+        },
+        {
+          key: "gateway",
+          label: "Connecting agents to gateway",
+          status: "done",
+        },
+      ],
+    });
     getOnboardingTaskForSkipAction.mockResolvedValue({
       ok: true,
       task_display_id: "acme-1",
       cmo_agent_slug: "cmo-greg",
     });
-    setStep("connect", "acme");
+    setStep("setup", "acme");
     render(<OnboardingFlow />);
-    fireEvent.click(
-      await screen.findByRole("button", { name: /Skip Google Ads/i }),
-    );
     await waitFor(() =>
       expect(routerReplace).toHaveBeenCalledWith(
         "/acme/agents/cmo-greg/tasks?task=acme-1",
@@ -299,18 +319,40 @@ describe("OnboardingFlow — ConnectStep", () => {
     );
   });
 
-  it("toasts when the skip lookup fails", async () => {
-    getOnboardingTaskForSkipAction.mockResolvedValue({
-      ok: false,
-      error: "Onboarding task not found.",
+  it("surfaces an error when provisioning fails", async () => {
+    getProvisioningProgressAction.mockResolvedValue({
+      ok: true,
+      overall: "failed",
+      steps: [
+        {
+          key: "cmo",
+          label: "Setting up CMO",
+          status: "failed",
+          error: "openclaw agents add failed",
+        },
+        {
+          key: "google_ads",
+          label: "Setting up Google Ads specialist",
+          status: "pending",
+        },
+        {
+          key: "gateway",
+          label: "Connecting agents to gateway",
+          status: "pending",
+        },
+      ],
     });
-    setStep("connect", "acme");
+    setStep("setup", "acme");
     render(<OnboardingFlow />);
-    fireEvent.click(
-      await screen.findByRole("button", { name: /Skip Google Ads/i }),
-    );
     await waitFor(() =>
-      expect(toastFns.error).toHaveBeenCalledWith("Onboarding task not found."),
+      expect(
+        screen.getAllByText(/openclaw agents add failed/i).length,
+      ).toBeGreaterThan(0),
+    );
+    // The failing row stays visible (red status icon) and a top-level
+    // error alert summarises the failure so it can't be missed.
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /openclaw agents add failed/i,
     );
   });
 });

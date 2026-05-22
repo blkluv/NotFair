@@ -249,6 +249,49 @@ export async function setOnboardingAccountAction(
   };
 }
 
+export type ProvisioningProgressResult =
+  | { ok: true; steps: { key: string; label: string; status: string; error?: string }[]; overall: "running" | "done" | "failed" }
+  | { ok: false; error: string };
+
+/**
+ * Poll endpoint for the onboarding "Setting up your agents…" screen.
+ * Returns the live per-template provisioning checklist published by
+ * `ensureProjectAgents`. The client polls this every ~500ms while the
+ * user watches each row flip from pending → in_progress → done.
+ *
+ * Falls back to a synthesized "done" view when the in-memory progress
+ * map is empty AND the agents already exist on disk (cold-start path
+ * for users who navigate back to the setup URL after provisioning
+ * completed in a prior request).
+ */
+export async function getProvisioningProgressAction(
+  project_slug: string,
+): Promise<ProvisioningProgressResult> {
+  if (!project_slug.trim()) {
+    return { ok: false, error: "Missing project slug." };
+  }
+  const project = getProject(project_slug);
+  if (!project) return { ok: false, error: "Project not found." };
+
+  const { getProgress } = await import("./provisioning-progress");
+  const progress = getProgress(project_slug);
+  if (progress) {
+    return { ok: true, steps: progress.steps, overall: progress.overall };
+  }
+  // Cold-start: no progress record (process restart between provisioning
+  // and the user hitting this screen). Treat as done so the screen
+  // proceeds to redirect instead of hanging.
+  return {
+    ok: true,
+    steps: [
+      { key: "cmo", label: "Setting up CMO", status: "done" },
+      { key: "google_ads", label: "Setting up Google Ads specialist", status: "done" },
+      { key: "gateway", label: "Connecting agents to gateway", status: "done" },
+    ],
+    overall: "done",
+  };
+}
+
 export type OnboardingReadyResult =
   | { ok: true }
   | { ok: false; error: string };

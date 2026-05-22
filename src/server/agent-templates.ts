@@ -3,6 +3,11 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { openclaw } from "@/server/openclaw/cli";
 import { listAllAgents } from "@/server/openclaw/gateway-rpc";
+import {
+  initProgress,
+  updateStep,
+  type ProgressStep,
+} from "@/server/onboarding/provisioning-progress";
 import { readAgentMeta, writeAgentMeta } from "@/server/agent-meta";
 import {
   cleanupLegacyOrchestrationRows,
@@ -316,7 +321,27 @@ export async function ensureProjectAgents(
     ? TEMPLATES.filter((t) => scope.includes(t.key))
     : TEMPLATES;
 
+  // Publish per-template progress so the onboarding setup screen can
+  // render a live "Setting up CMO… / Setting up Google Ads agent…"
+  // checklist instead of a single opaque spinner. The "gateway" row
+  // covers the snapshot-warm-up that happens after the openclaw rows
+  // are written.
+  const progressSteps: ProgressStep[] = [
+    ...templates.map<ProgressStep>((t) => ({
+      key: t.key,
+      label: `Setting up ${t.display_name}${t.key === "cmo" ? "" : " specialist"}`,
+      status: "pending",
+    })),
+    {
+      key: "gateway",
+      label: "Connecting agents to gateway",
+      status: "pending",
+    },
+  ];
+  initProgress(project_slug, progressSteps);
+
   for (const template of templates) {
+    updateStep(project_slug, template.key, { status: "in_progress" });
     // Resolve the personal name FIRST. The agent_id encodes it, so this
     // value drives both the OpenClaw backend name and the URL slug.
     const personalName = names?.[template.key] ?? template.default_name;
@@ -340,6 +365,7 @@ export async function ensureProjectAgents(
         created_at: existing?.created_at ?? new Date().toISOString(),
       });
       existed.push(agentId);
+      updateStep(project_slug, template.key, { status: "done" });
       continue;
     }
     try {
@@ -367,11 +393,16 @@ export async function ensureProjectAgents(
         created_at: new Date().toISOString(),
       });
       created.push(agentId);
+      updateStep(project_slug, template.key, { status: "done" });
     } catch (err) {
       // Surface but don't crash the loop; partial provisioning recoverable on retry.
       const message = err instanceof Error ? err.message : String(err);
       console.error(`Failed to create agent ${agentId}:`, err);
       failed.push({ name: agentId, error: message });
+      updateStep(project_slug, template.key, {
+        status: "failed",
+        error: message,
+      });
     }
   }
 
@@ -385,7 +416,11 @@ export async function ensureProjectAgents(
   // here doesn't block provisioning — runTaskKickoffServerSide also has
   // retry-on-this-error as a second line of defense.
   if (created.length > 0) {
+    updateStep(project_slug, "gateway", { status: "in_progress" });
     await waitForGatewayToSeeAgents(created);
+    updateStep(project_slug, "gateway", { status: "done" });
+  } else {
+    updateStep(project_slug, "gateway", { status: "done" });
   }
 
   // Register the orchestration MCP server with OpenClaw — once, globally.
