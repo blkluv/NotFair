@@ -524,7 +524,7 @@ function TaskCard({
     >
       <div className="flex items-center justify-between gap-2">
         <span className="font-mono text-[10px] text-muted-foreground tabular-nums">
-          {task.display_id}
+          {task.display_id.toUpperCase()}
         </span>
         <span className="text-[10px] text-muted-foreground">
           {relativeTime(task.updated_at)}
@@ -607,7 +607,7 @@ function ListView({
               className="grid grid-cols-[6rem_7rem_minmax(0,1fr)_9rem_6rem] items-center gap-3 px-3 py-2 text-xs transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-foreground/30"
             >
               <span className="truncate font-mono text-[11px] text-muted-foreground tabular-nums">
-                {t.display_id}
+                {t.display_id.toUpperCase()}
               </span>
               <span className="flex items-center gap-1.5">
                 <span

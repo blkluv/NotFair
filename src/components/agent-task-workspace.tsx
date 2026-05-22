@@ -227,7 +227,7 @@ export function AgentTaskWorkspace({
                         Tasks
                       </Link>
                       <span>/</span>
-                      <span className="font-mono">{selected.task.display_id}</span>
+                      <span className="font-mono">{selected.task.display_id.toUpperCase()}</span>
                     </div>
                     <h1 className="mt-0.5 text-base font-semibold tracking-tight truncate">
                       {selected.task.title ?? "(untitled task)"}
@@ -351,7 +351,7 @@ function SelectedTaskPanel({
     if (selected.task.blocked_by_task_id) {
       const blocker = taskById.get(selected.task.blocked_by_task_id);
       blockedReason = blocker
-        ? `waiting on ${blocker.display_id}`
+        ? `waiting on ${blocker.display_id.toUpperCase()}`
         : "waiting on an upstream task";
     } else if (liveApprovals.length > 0) {
       blockedReason =
@@ -475,7 +475,7 @@ function TaskRow({
         </span>
         <span className="min-w-0 flex-1 truncate text-xs">
           <span className="mr-1.5 font-mono text-[10px] text-muted-foreground tabular-nums">
-            {task.display_id}
+            {task.display_id.toUpperCase()}
           </span>
           <span
             className={cn(
@@ -501,7 +501,7 @@ function TaskRow({
             <>
               Waiting on{" "}
               <span className="font-mono tabular-nums">
-                {blocker.display_id}
+                {blocker.display_id.toUpperCase()}
               </span>
             </>
           ) : (
