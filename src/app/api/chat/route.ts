@@ -7,6 +7,10 @@ import {
   buildPendingSessionKey,
   findSessionBySessionId,
 } from "@/server/openclaw/sessions";
+import {
+  openShadowWriter,
+  shadowStreamEvent,
+} from "@/server/openclaw/shadow-transcript";
 import { claimProposedTask, getTask } from "@/server/db/tasks";
 
 export const dynamic = "force-dynamic";
@@ -198,6 +202,14 @@ export async function POST(request: Request) {
 
       let firstSseDeltaSent = false;
       let assistantBuffer = "";
+      // Tee gateway events into the shadow JSONL so the /live SSE bridge
+      // can replay them when the user re-opens the task page (e.g. after a
+      // tab switch). Without this, only runTaskKickoffServerSide-initiated
+      // tasks have a shadow — /api/chat-initiated turns (the onboarding
+      // auto-kickoff, plus user messages mid-task) would leave the
+      // transcript blank on re-attach because the in-flight stream is
+      // already gone and OpenClaw's JSONL hasn't flushed yet.
+      const shadow = await openShadowWriter(agentName, sessionId);
       try {
         perf.mark("stream_start");
         // Surface input sizes so each perf trace tells us *why* this turn
@@ -219,6 +231,13 @@ export async function POST(request: Request) {
           signal: noAbort.signal,
           perf,
         })) {
+          // Best-effort shadow tee. A shadow write failure must not break
+          // the live stream the user sees.
+          try {
+            await shadowStreamEvent(shadow, evt);
+          } catch (err) {
+            console.error("[api/chat] shadow write failed:", err);
+          }
           if (evt.kind === "delta") {
             if (!firstSseDeltaSent) {
               firstSseDeltaSent = true;
@@ -242,6 +261,7 @@ export async function POST(request: Request) {
           }
           // "final" implicitly ends the loop after; no separate signal needed.
         }
+        await shadow.close();
         perf.mark("stream_done");
 
         // Orchestration side effects (task creation, status updates,
@@ -258,6 +278,10 @@ export async function POST(request: Request) {
           message: err instanceof Error ? err.message : String(err),
         });
       } finally {
+        // Close the shadow if it's still open (error path). Idempotent
+        // close — calling twice when the success path already closed is
+        // a no-op flush.
+        await shadow.close().catch(() => undefined);
         try {
           controller.close();
         } catch {
