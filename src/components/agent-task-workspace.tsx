@@ -245,8 +245,8 @@ export function AgentTaskWorkspace({
                   <div className="mt-2 max-h-[40vh] overflow-y-auto pl-3 text-sm text-muted-foreground">
                     <Markdown>{selected.task.brief}</Markdown>
                     {selected.task.success_criteria && (
-                      <div className="mt-2 border-l-2 border-muted pl-3 text-xs">
-                        <div className="mb-1 font-medium text-foreground">
+                      <div className="mt-4">
+                        <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                           Success criteria
                         </div>
                         <Markdown>{selected.task.success_criteria}</Markdown>
