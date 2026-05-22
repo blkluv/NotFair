@@ -249,6 +249,49 @@ export async function setOnboardingAccountAction(
   };
 }
 
+export type OnboardingReadyResult =
+  | { ok: true }
+  | { ok: false; error: string };
+
+/**
+ * Block until the project's agents are fully provisioned AND the gateway's
+ * runtime snapshot has surfaced them. Called by the onboarding "connect or
+ * skip" screen so the user never sees a Connect/Skip button before the
+ * agent is ready to receive its first chat.send — without this, clicking
+ * Skip immediately after creating a project races the
+ * `openclaw agents add` config write and the kickoff fails with
+ * INVALID_REQUEST "Agent '<id>' no longer exists in configuration".
+ *
+ * 30-second ceiling matches the worst-case provisioning + gateway-wait
+ * we've observed in dev. Returns ok=false on timeout so the UI can show
+ * a retry-friendly error instead of hanging forever.
+ */
+export async function awaitOnboardingReadyAction(
+  project_slug: string,
+): Promise<OnboardingReadyResult> {
+  if (!project_slug.trim()) {
+    return { ok: false, error: "Missing project slug." };
+  }
+  const project = getProject(project_slug);
+  if (!project) return { ok: false, error: "Project not found." };
+
+  const { awaitProvisioning } = await import("./provisioning-state");
+  const ready = await awaitProvisioning(project_slug, 30_000);
+  if (ready.kind === "timeout") {
+    return {
+      ok: false,
+      error: "Setting up your agents is taking longer than expected. Refresh to retry.",
+    };
+  }
+  if (ready.kind === "no-agents") {
+    return {
+      ok: false,
+      error: "Agent provisioning hasn't started for this project.",
+    };
+  }
+  return { ok: true };
+}
+
 export type SkipAccountResult =
   | { ok: true; task_display_id: string; cmo_agent_slug: string }
   | { ok: false; error: string };
@@ -261,9 +304,13 @@ export type SkipAccountResult =
  * task is only meaningful once Google Ads is wired up, and the user can
  * always reach the connect screen later from /connections.
  *
- * The PROJECT.md kickoff was already fired server-side by
- * createProjectForOnboardingAction (post-provisioning .then). All we do
- * here is forward the slugs the client needs to navigate.
+ * Blocks until provisioning has fully resolved — `ensureProjectAgents`
+ * itself waits for the gateway's runtime config to surface the new agent
+ * ids — so by the time the redirect fires, the agent is registered AND
+ * the gateway sees it. Without this, the kickoff (server-side via
+ * startTaskIfProposed OR client-side via /api/chat) can outrun the
+ * `openclaw agents add` config rewrite and fail with INVALID_REQUEST
+ * "Agent '<id>' no longer exists in configuration".
  */
 export async function getOnboardingTaskForSkipAction(
   project_slug: string,
@@ -273,6 +320,21 @@ export async function getOnboardingTaskForSkipAction(
   }
   const project = getProject(project_slug);
   if (!project) return { ok: false, error: "Project not found." };
+
+  const { awaitProvisioning } = await import("./provisioning-state");
+  const ready = await awaitProvisioning(project_slug, 30_000);
+  if (ready.kind === "timeout") {
+    return {
+      ok: false,
+      error: "Setting up your agents is taking longer than expected. Try again in a moment.",
+    };
+  }
+  if (ready.kind === "no-agents") {
+    return {
+      ok: false,
+      error: "Agent provisioning hasn't started for this project.",
+    };
+  }
 
   const { listTasks } = await import("@/server/db/tasks");
   const { listProjectAgents } = await import("@/server/agent-meta");

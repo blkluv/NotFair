@@ -18,6 +18,7 @@ import {
   listGoogleAdsAccounts,
   setOnboardingAccountAction,
   getOnboardingTaskForSkipAction,
+  awaitOnboardingReadyAction,
   type GoogleAdsAccount,
 } from "@/server/onboarding/accounts";
 
@@ -268,10 +269,39 @@ function NameStep({ onCreated }: { onCreated: (slug: string) => void }) {
 
 // ── Step 2: Connect ────────────────────────────────────────────────
 
+type ReadyState =
+  | { phase: "waiting" }
+  | { phase: "ready" }
+  | { phase: "error"; message: string };
+
 function ConnectStep({ slug }: { slug: string }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [readiness, setReadiness] = useState<ReadyState>({ phase: "waiting" });
   const connectionsHref = projectHref(slug, "/connections");
+
+  // Block the screen until `ensureProjectAgents` has finished AND the
+  // gateway's runtime config snapshot has surfaced the new agents. Without
+  // this, clicking Skip immediately after Continue races the
+  // `openclaw agents add` config write and the kickoff fails with
+  // INVALID_REQUEST "Agent '<id>' no longer exists in configuration".
+  // While we're waiting the user sees a "Setting up your agents…" card
+  // — same screen, same place, no surprising state transitions.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const r = await awaitOnboardingReadyAction(slug);
+      if (cancelled) return;
+      if (!r.ok) {
+        setReadiness({ phase: "error", message: r.error });
+        return;
+      }
+      setReadiness({ phase: "ready" });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [slug]);
 
   async function onConnect() {
     setBusy(true);
@@ -334,24 +364,44 @@ function ConnectStep({ slug }: { slug: string }) {
 
       <Card>
         <CardContent className="space-y-4 pt-6">
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={onConnect} disabled={busy} size="lg">
-              {busy ? (
-                <Loader2 className="mr-1.5 size-4 animate-spin" />
-              ) : (
-                <Plug className="mr-1.5 size-4" />
-              )}
-              Connect Google Ads
-            </Button>
-            <Button
-              onClick={onSkip}
-              variant="ghost"
-              disabled={busy}
-              aria-label="Skip Google Ads connection for now and go to CMO tasks"
+          {readiness.phase === "waiting" && (
+            <div
+              className="flex items-center gap-2 text-sm text-muted-foreground"
+              role="status"
+              aria-live="polite"
             >
-              Skip for now
-            </Button>
-          </div>
+              <Loader2 className="size-4 animate-spin" />
+              Setting up your agents…
+            </div>
+          )}
+          {readiness.phase === "error" && (
+            <p
+              className="text-sm text-destructive"
+              role="alert"
+            >
+              {readiness.message}
+            </p>
+          )}
+          {readiness.phase === "ready" && (
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={onConnect} disabled={busy} size="lg">
+                {busy ? (
+                  <Loader2 className="mr-1.5 size-4 animate-spin" />
+                ) : (
+                  <Plug className="mr-1.5 size-4" />
+                )}
+                Connect Google Ads
+              </Button>
+              <Button
+                onClick={onSkip}
+                variant="ghost"
+                disabled={busy}
+                aria-label="Skip Google Ads connection for now and go to CMO tasks"
+              >
+                Skip for now
+              </Button>
+            </div>
+          )}
           <p className="text-xs text-muted-foreground">
             You can disconnect anytime in{" "}
             <Link href={connectionsHref} className="underline underline-offset-2">
