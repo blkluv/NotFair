@@ -6,13 +6,15 @@ import {
   findSessionBySessionId,
   listSessionsForAgent,
 } from "@/server/openclaw/sessions";
+import { classifySessions } from "@/server/openclaw/thread-origins";
 import { storedMcpKey } from "@/server/mcp-catalog";
 import { getMcpStatus } from "@/server/mcp-state";
 import { readTranscriptTail } from "@/server/openclaw/transcript-tail";
 import { LiveTranscript } from "@/components/live-transcript";
 import { GoogleAdsMcpBanner } from "@/components/google-ads-mcp-banner";
 import { McpFlashBanner } from "@/components/mcp-flash-banner";
-import { ThreadSelector } from "@/components/thread-selector";
+import { ThreadSelector, type SessionLite } from "@/components/thread-selector";
+import { NewChatButton } from "@/components/new-chat-button";
 
 type Params = { agent: string; thread: string; project: string };
 type Search = { mcp_connected?: string; mcp_error?: string };
@@ -45,10 +47,23 @@ export default async function AgentChatThreadPage({
   const { events: initialEvents, byteOffset: initialByteOffset } =
     readTranscriptTail(agentFullId, threadId, 0);
 
+  // Classify existing sessions by origin (task / cron / chat) so the
+  // dropdown can show the task display_id, cron name, or first-message
+  // preview instead of opaque UUIDs.
+  const origins = await classifySessions(agentFullId, project.slug, allSessions);
+  const enriched: SessionLite[] = allSessions.map((s) => ({
+    sessionId: s.sessionId,
+    label: s.label,
+    sessionKey: s.sessionKey,
+    lastInteractionAt: s.lastInteractionAt,
+    pending: s.pending,
+    origin: origins.get(s.label),
+  }));
+
   // For the dropdown: surface the pending thread at the top so the user sees
   // it's "selected" even before sending the first message.
-  const sessionsForDropdown = existing
-    ? allSessions
+  const sessionsForDropdown: SessionLite[] = existing
+    ? enriched
     : [
         {
           sessionId: threadId,
@@ -57,7 +72,7 @@ export default async function AgentChatThreadPage({
           lastInteractionAt: 0,
           pending: true,
         },
-        ...allSessions,
+        ...enriched,
       ];
 
   // The Google Ads agent depends on the notfair-googleads MCP for live
@@ -89,12 +104,15 @@ export default async function AgentChatThreadPage({
             ? "No threads yet"
             : `${sessionsForDropdown.length} thread${sessionsForDropdown.length === 1 ? "" : "s"}`}
         </div>
-        <ThreadSelector
-          projectSlug={projectSlug}
-          agentSlug={agentSlug}
-          sessions={sessionsForDropdown}
-          activeSessionId={threadId}
-        />
+        <div className="flex items-center gap-2">
+          <ThreadSelector
+            projectSlug={projectSlug}
+            agentSlug={agentSlug}
+            sessions={sessionsForDropdown}
+            activeSessionId={threadId}
+          />
+          <NewChatButton projectSlug={projectSlug} agentSlug={agentSlug} />
+        </div>
       </div>
 
       <div className="min-h-0 flex-1">
