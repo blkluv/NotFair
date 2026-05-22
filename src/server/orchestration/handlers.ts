@@ -11,6 +11,7 @@ import {
   listActionableApprovals,
   listApprovalsForTask,
 } from "@/server/db/approvals";
+import { createQuestion } from "@/server/db/questions";
 import { getDb } from "@/server/db/db";
 import { getProject } from "@/server/db/projects";
 import {
@@ -371,7 +372,12 @@ export type AskUserInput = {
 export function handleAskUser(
   input: AskUserInput,
   ctx: HandlerContext,
-): HandlerResult<{ question: string; task_id: string | null }> {
+): HandlerResult<{
+  question_id: string;
+  question: string;
+  task_id: string | null;
+  options: string[];
+}> {
   let resolvedTaskId: string | null = null;
   if (input.task_id) {
     const task = getTask(input.task_id);
@@ -386,17 +392,51 @@ export function handleAskUser(
     }
     resolvedTaskId = task.id;
   }
+
+  // Parse comma-separated options into a clean string[] — the tool input
+  // is a comma-separated string for ergonomics in the agent template, but
+  // the DB and UI use a structured array. Drop empties/whitespace so the
+  // UI never renders an empty button.
+  const options = (input.options ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+
+  const question = createQuestion({
+    project_slug: ctx.project_slug,
+    agent_id: ctx.agent_id,
+    task_id: resolvedTaskId,
+    prompt: input.question,
+    options,
+  });
+
+  // Park the task in `blocked` so the workspace renders the QuestionCard
+  // and the agent doesn't keep running while waiting on a human answer.
+  // Mirrors request_approval's blocking behavior.
+  if (resolvedTaskId) {
+    markTaskBlocked(resolvedTaskId);
+  }
+
   logAgentAction({
     project_slug: ctx.project_slug,
     agent_id: ctx.agent_id,
     task_id: resolvedTaskId,
     action_type: "ask_user",
     summary: input.question,
-    payload: { task_id: resolvedTaskId, options: input.options ?? null },
+    payload: {
+      task_id: resolvedTaskId,
+      options,
+      question_id: question.id,
+    },
   });
   return {
     ok: true,
-    data: { question: input.question, task_id: resolvedTaskId },
+    data: {
+      question_id: question.id,
+      question: input.question,
+      task_id: resolvedTaskId,
+      options,
+    },
   };
 }
 

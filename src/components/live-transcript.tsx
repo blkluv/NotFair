@@ -582,11 +582,15 @@ export function LiveTranscript({
   // so the user sees the same anchor whether the agent is mid-call,
   // mid-stream, or waiting on the next model token.
   //
+  // For `blocked` tasks the composer is enabled (so the user can answer
+  // a question or interject) but the agent is still dormant — render
+  // the BlockedStatus pill so the chat doesn't read as live.
+  //
   // (Earlier we hid the indicator once anything pending was rendered.
   // That made the chat read as "stuck" the moment streaming started —
   // there was no longer any active animation to telegraph "I'm still
   // working.")
-  const showThinking = sendingChat || composerDisabled;
+  const showThinking = sendingChat || composerDisabled || Boolean(blockedReason);
 
   return (
     <div className="flex h-full flex-col">
@@ -601,7 +605,8 @@ export function LiveTranscript({
           {rendered.length === 0 &&
           !pendingUserMsg &&
           !sendingChat &&
-          !composerDisabled ? (
+          !composerDisabled &&
+          !blockedReason ? (
             <TranscriptEmptyState agentDisplayName={agentDisplayName} />
           ) : (
             <ol className="space-y-4">
@@ -713,7 +718,9 @@ export function LiveTranscript({
               placeholder={
                 composerDisabled
                   ? `${agentDisplayName} is on a task — the transcript updates live`
-                  : `Message ${agentDisplayName}…  (type / for commands)`
+                  : blockedReason
+                    ? `Reply to ${agentDisplayName} — typing won't resolve the block, but the agent will see your message`
+                    : `Message ${agentDisplayName}…  (type / for commands)`
               }
               rows={1}
               className="flex min-h-[40px] flex-1 resize-none rounded-xl border bg-background px-3.5 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
@@ -1146,7 +1153,8 @@ function BlockedStatus({ reason }: { reason: string }) {
         </div>
         <div className="mt-0.5 text-[11px] text-amber-700/80 dark:text-amber-300/70">
           The agent will resume automatically when the gating condition
-          resolves.
+          resolves. You can also reply below to give context or answer a
+          question.
         </div>
       </div>
     </div>

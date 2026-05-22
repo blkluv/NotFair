@@ -262,8 +262,14 @@ async function handleAskUserTool(input: unknown): Promise<ToolResult> {
     { project_slug, agent_id },
   );
   if (!r.ok) return { ok: false, error: r.error };
+  // The task is now parked in `blocked`; the agent should end its turn
+  // and wait for the user's answer to be delivered via a [SYSTEM] wake-up
+  // turn. Surface the question_id so the agent can correlate.
+  const taskClause = r.data.task_id
+    ? ` on task ${r.data.task_id}. The task is now blocked until the user answers; end your turn.`
+    : ".";
   return txt(
-    `question recorded${r.data.task_id ? ` on task ${r.data.task_id}` : ""}.`,
+    `question ${r.data.question_id} recorded${taskClause}`,
   );
 }
 

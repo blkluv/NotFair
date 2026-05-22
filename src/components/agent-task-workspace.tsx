@@ -13,6 +13,7 @@ import {
 import { toast } from "sonner";
 
 import { ApprovalCard } from "@/components/approval-card";
+import { QuestionCard } from "@/components/question-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { LiveTranscript } from "@/components/live-transcript";
@@ -23,9 +24,17 @@ import { cancelTaskAction } from "@/server/actions/tasks";
 import { cn } from "@/lib/utils";
 import { projectHref } from "@/lib/project-href";
 import type { TranscriptEvent } from "@/server/openclaw/transcript-tail";
-import type { Approval, Task, TaskStatus } from "@/types";
+import type { Approval, Question, Task, TaskStatus } from "@/types";
 
 const TASK_IN_FLIGHT: TaskStatus[] = ["proposed", "approved", "working", "blocked"];
+
+// Composer is locked only while the agent is actively running. `blocked`
+// is dormant by design (waiting on approval or an upstream task) — the
+// user must be able to type into it to give context, answer a question
+// the agent posed, or steer the next attempt. Approve/Deny on the
+// ApprovalCard remains the canonical way to resolve the block; the
+// composer is a parallel channel for free-form direction.
+const COMPOSER_LOCKED: TaskStatus[] = ["proposed", "approved", "working"];
 
 // `blocked` covers two distinct reasons: waiting on an approval, or
 // waiting on another task to finish. The section header stays generic
@@ -64,6 +73,9 @@ type SelectedTaskBundle = {
   /** Approvals attached to this task, newest first. Rendered above the
    *  transcript so the user can act on a pending one without leaving the chat. */
   approvals: Approval[];
+  /** Questions attached to this task, newest first. Pending ones render
+   *  as a QuestionCard above the transcript. */
+  questions: Question[];
   /**
    * Set when this task is still in `proposed` and the workspace should
    * auto-fire the kickoff via /api/chat on mount. Null once the task has
@@ -293,6 +305,7 @@ function SelectedTaskPanel({
 }) {
   const router = useRouter();
   const isInFlight = TASK_IN_FLIGHT.includes(selected.task.status);
+  const composerLocked = COMPOSER_LOCKED.includes(selected.task.status);
   // We refresh the server tree on every in-flight poll so the status
   // badge + sidebar in-flight counters track the DB even when nothing
   // has landed in the JSONL transcript yet.
@@ -327,10 +340,14 @@ function SelectedTaskPanel({
   const liveApprovals = selected.approvals.filter(
     (a) => a.status === "pending" || a.status === "revision_requested",
   );
+  const openQuestions = selected.questions.filter(
+    (q) => q.status === "pending",
+  );
   // When the task is parked in `blocked`, build a short "why" string so
   // the LiveTranscript can replace its forward-motion indicator
   // ("thinking…", "wrapping up…") with an honest paused-state pill.
-  // Two distinct reasons: (a) approval pending (b) gated on another task.
+  // Three distinct reasons: (a) question pending (b) approval pending
+  // (c) gated on another task.
   let blockedReason: string | undefined;
   if (selected.task.status === "blocked") {
     if (selected.task.blocked_by_task_id) {
@@ -338,6 +355,11 @@ function SelectedTaskPanel({
       blockedReason = blocker
         ? `waiting on ${blocker.display_id.toUpperCase()}`
         : "waiting on an upstream task";
+    } else if (openQuestions.length > 0) {
+      blockedReason =
+        openQuestions.length === 1
+          ? "waiting on your answer"
+          : `waiting on ${openQuestions.length} answers`;
     } else if (liveApprovals.length > 0) {
       blockedReason =
         liveApprovals.length === 1
@@ -349,8 +371,15 @@ function SelectedTaskPanel({
   }
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {liveApprovals.length > 0 && (
+      {(openQuestions.length > 0 || liveApprovals.length > 0) && (
         <div className="mx-auto w-full max-w-3xl space-y-3 px-6 pt-4">
+          {openQuestions.map((q) => (
+            <QuestionCard
+              key={q.id}
+              question={q}
+              options={parseOptionsJson(q.options_json)}
+            />
+          ))}
           {liveApprovals.map((a) => (
             <ApprovalCard key={a.id} approval={a} />
           ))}
@@ -366,7 +395,7 @@ function SelectedTaskPanel({
           sessionKey={selected.sessionKey}
           initialEvents={selected.initialEvents}
           initialByteOffset={selected.initialByteOffset}
-          composerDisabled={isInFlight}
+          composerDisabled={composerLocked}
           blockedReason={blockedReason}
           onPolled={onPolled}
           autoKickoff={selected.kickoff !== null}
@@ -539,6 +568,21 @@ function EmptyRightPane({
       </div>
     </div>
   );
+}
+
+/** Parse Question.options_json into a string[] in a client-safe way.
+ *  Mirrors @/server/db/questions#parseQuestionOptions but avoids importing
+ *  the server module from a client component. */
+function parseOptionsJson(json: string): string[] {
+  try {
+    const parsed = JSON.parse(json);
+    if (Array.isArray(parsed) && parsed.every((x) => typeof x === "string")) {
+      return parsed;
+    }
+  } catch {
+    // fall through
+  }
+  return [];
 }
 
 function formatRelative(iso: string): string {

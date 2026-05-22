@@ -624,3 +624,78 @@ describe("handleTaskStatus — blocked_by_task_id propagation", () => {
     expect(a2.status).toBe("cancelled"); // untouched
   });
 });
+
+describe("handleAskUser — ask_user_question", () => {
+  it("persists a Question row with parsed options and parks the task in blocked", async () => {
+    const { handleAskUser } = await import("./handlers");
+    const t = createTask({
+      project_slug: "demo",
+      agent_id: "demo-cmo",
+      brief: "x",
+    });
+    const r = handleAskUser(
+      {
+        question: "Which channel first?",
+        task_id: t.id,
+        options: " Google Ads ,  Meta ,, TikTok ",
+      },
+      { project_slug: "demo", agent_id: "demo-cmo" },
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.question_id).toMatch(/[0-9a-f-]{36}/);
+    expect(r.data.options).toEqual(["Google Ads", "Meta", "TikTok"]);
+
+    // Row persisted with status='pending' and options serialized.
+    const row = testDb
+      .prepare("SELECT status, options_json, task_id FROM questions WHERE id = ?")
+      .get(r.data.question_id) as {
+        status: string;
+        options_json: string;
+        task_id: string | null;
+      };
+    expect(row.status).toBe("pending");
+    expect(row.task_id).toBe(t.id);
+    expect(JSON.parse(row.options_json)).toEqual([
+      "Google Ads",
+      "Meta",
+      "TikTok",
+    ]);
+
+    // Task transitioned to blocked.
+    const taskAfter = testDb
+      .prepare("SELECT status FROM tasks WHERE id = ?")
+      .get(t.id) as { status: string };
+    expect(taskAfter.status).toBe("blocked");
+  });
+
+  it("does not block when there's no task_id (free-standing question)", async () => {
+    const { handleAskUser } = await import("./handlers");
+    const r = handleAskUser(
+      { question: "What's your timezone?" },
+      { project_slug: "demo", agent_id: "demo-cmo" },
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.task_id).toBeNull();
+    const row = testDb
+      .prepare("SELECT task_id FROM questions WHERE id = ?")
+      .get(r.data.question_id) as { task_id: string | null };
+    expect(row.task_id).toBeNull();
+  });
+
+  it("rejects cross-project task references", async () => {
+    const { handleAskUser } = await import("./handlers");
+    const t = createTask({
+      project_slug: "demo",
+      agent_id: "demo-cmo",
+      brief: "x",
+    });
+    const r = handleAskUser(
+      { question: "?", task_id: t.id },
+      { project_slug: "other", agent_id: "other-cmo" },
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/Cross-project/);
+  });
+});

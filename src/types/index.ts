@@ -134,6 +134,35 @@ export type Approval = {
   resolved_at: string | null;
 };
 
+/** Open question raised by an agent via the `ask_user_question` MCP tool.
+ *  Modeled like Approval — a pending row blocks the task; the user answers
+ *  (option or free-text) or cancels; the wake-up streams the resolution
+ *  back to the agent as a [SYSTEM] message on the task thread. */
+export type QuestionStatus = "pending" | "answered" | "cancelled";
+
+export type Question = {
+  id: string;
+  project_slug: string;
+  agent_id: string;
+  /** Task this question is anchored to. Null for free-standing asks. */
+  task_id: string | null;
+  prompt: string;
+  /** Optional multiple-choice hints rendered as buttons in the UI. JSON
+   *  array of strings. Empty array when the agent didn't supply choices. */
+  options_json: string;
+  status: QuestionStatus;
+  /** Zero-based index into options_json[] when the user picked an option.
+   *  Null when the user only typed free-text or cancelled. */
+  answer_option_index: number | null;
+  /** Free-text answer the user typed alongside / instead of an option.
+   *  Null when the user only clicked an option or cancelled. */
+  answer_text: string | null;
+  /** Who resolved the question — user (typical) vs system (future timeout). */
+  resolved_by_kind: "user" | "system" | null;
+  created_at: string;
+  resolved_at: string | null;
+};
+
 export type ApprovalComment = {
   id: string;
   approval_id: string;

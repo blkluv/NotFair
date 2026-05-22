@@ -4,6 +4,7 @@ import { AgentTaskWorkspace } from "@/components/agent-task-workspace";
 import { getProject } from "@/server/db/projects";
 import { resolveAgentBySlug } from "@/server/agent-meta";
 import { listApprovalsForTask } from "@/server/db/approvals";
+import { listQuestionsForTask } from "@/server/db/questions";
 import { getTask, listTasksByAgent, setTaskThreadIfMissing } from "@/server/db/tasks";
 import { buildPendingSessionKey, findSessionBySessionId } from "@/server/openclaw/sessions";
 import {
@@ -14,7 +15,7 @@ import {
   buildTaskKickoffMessage,
   generateTaskThreadId,
 } from "@/server/orchestration/task-kickoff";
-import type { Approval, Task } from "@/types";
+import type { Approval, Question, Task } from "@/types";
 
 type Props = {
   params: Promise<{ agent: string; project: string }>;
@@ -34,6 +35,13 @@ type SelectedBundle = {
    * the audit trail for "what did I approve here?".
    */
   approvals: Approval[];
+  /**
+   * Every question ever raised on this task via `ask_user_question`,
+   * newest first. The chat view renders the pending one inline so the
+   * user can answer without leaving the task; resolved rows stay as the
+   * audit trail.
+   */
+  questions: Question[];
   /**
    * Auto-kickoff payload for tasks that haven't started yet. The page
    * builds the full assignment brief server-side so the client can just
@@ -110,6 +118,7 @@ async function loadSelectedBundle(
 
   const { events, byteOffset } = readTranscriptTail(agentFullId, threadId, 0);
   const approvals = listApprovalsForTask(task.id);
+  const questions = listQuestionsForTask(task.id);
 
   // Only minted for `proposed` tasks. The client uses this to fire the
   // first turn via /api/chat (which streams gateway events live), and
@@ -127,6 +136,7 @@ async function loadSelectedBundle(
     initialEvents: events,
     initialByteOffset: byteOffset,
     approvals,
+    questions,
     kickoff,
   };
 }

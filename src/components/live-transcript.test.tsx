@@ -252,6 +252,24 @@ describe("LiveTranscript composer", () => {
     expect(textarea.placeholder).toMatch(/CMO is on a task/i);
   });
 
+  it("keeps the composer enabled when the task is blocked and surfaces the paused pill + helper placeholder", () => {
+    render(
+      <LiveTranscript
+        {...defaultProps({
+          composerDisabled: false,
+          blockedReason: "waiting on approval",
+          threadId: "t-blocked",
+        })}
+      />,
+    );
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    expect(textarea).not.toBeDisabled();
+    expect(textarea.placeholder).toMatch(/Reply to CMO/i);
+    // BlockedStatus pill replaces the live working indicator.
+    expect(screen.getByText(/Paused — waiting on approval/)).toBeInTheDocument();
+    expect(screen.queryByText(/^Starting$/)).not.toBeInTheDocument();
+  });
+
   it("submitting Shift+Enter inserts a newline and does NOT send", () => {
     render(<LiveTranscript {...defaultProps({ threadId: "t-shift" })} />);
     const textarea = screen.getByRole("textbox");
