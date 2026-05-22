@@ -276,6 +276,65 @@ export function LiveTranscript({
     };
   }, [pollIntervalMs, pollOnce, sendingChat, stopPolling]);
 
+  // ── Live re-attach: SSE bridge to OpenClaw's sessions.messages stream. ─
+  // OpenClaw buffers session JSONL until session.ended, so the polling
+  // path above sees nothing mid-turn. For an in-flight task (especially
+  // one auto-kicked-off server-side without a /api/chat SSE channel),
+  // this re-attaches to the gateway and forwards every session.message
+  // event live. Same dedup set as polling, so events that later land in
+  // JSONL don't double-render.
+  //
+  // Skipped during an active /api/chat send — that path already streams
+  // its own deltas; layering re-attach on top would just duplicate work.
+  useEffect(() => {
+    if (!composerDisabled) return;
+    if (sendingChat) return;
+    if (stopPolling) return;
+    // jsdom (vitest) doesn't ship EventSource. Skip the bridge there so
+    // component tests don't blow up; polling-path coverage stays intact.
+    if (typeof EventSource === "undefined") return;
+    const url = `/api/agents/${agentSlug}/threads/${threadId}/live?project=${encodeURIComponent(projectSlug)}`;
+    const es = new EventSource(url);
+    es.addEventListener("transcript", (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data) as { events: TranscriptEvent[] };
+        if (!Array.isArray(data.events)) return;
+        const fresh = data.events.filter(
+          (ev) => !seenEventIdsRef.current.has(ev.id),
+        );
+        for (const ev of fresh) seenEventIdsRef.current.add(ev.id);
+        if (fresh.length > 0) {
+          setEvents((prev) => [...prev, ...fresh]);
+          // Live events arrived: clear any optimistic placeholders for
+          // active sends + reset the "I'm waiting" indicator state.
+          setPendingUserMsg(null);
+          setPendingAssistant("");
+          setPendingTools([]);
+          setPendingError(null);
+          setPendingLifecycle(null);
+        }
+      } catch {
+        // Malformed payload; skip silently.
+      }
+    });
+    es.addEventListener("error", () => {
+      // EventSource auto-reconnects on transient drops; nothing else
+      // needed here. If the server actually returned an error response
+      // (4xx/5xx), reconnect attempts will keep failing and the source
+      // closes itself — polling continues regardless.
+    });
+    return () => {
+      es.close();
+    };
+  }, [
+    agentSlug,
+    composerDisabled,
+    projectSlug,
+    sendingChat,
+    stopPolling,
+    threadId,
+  ]);
+
   // ── Send: optimistic user message + SSE-driven streaming reply. ─────
   const send = useCallback(
     async (overrideText?: string, opts: { hidden?: boolean } = {}) => {

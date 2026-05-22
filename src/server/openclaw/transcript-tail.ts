@@ -65,7 +65,7 @@ type RawMessage = {
   isError?: boolean;
 };
 
-type RawEntry = {
+export type RawEntry = {
   type?: string;
   id?: string;
   timestamp?: string | number;
@@ -147,105 +147,109 @@ export function readTranscriptTail(
     } catch {
       continue;
     }
-    const baseId = `${entry.id ?? "anon"}-${lineIdx++}`;
-    const ts =
-      typeof entry.timestamp === "string"
-        ? Date.parse(entry.timestamp)
-        : typeof entry.timestamp === "number"
-          ? entry.timestamp
-          : 0;
-
-    if (entry.type !== "message") {
-      // Session metadata, model-config rows, etc. Surface as a faint
-      // "unknown" event the client can hide unless verbose mode is on.
-      events.push({ kind: "unknown", id: baseId, ts, raw_type: entry.type ?? "?" });
-      continue;
-    }
-    const msg = entry.message;
-    if (!msg) continue;
-
-    if (msg.role === "user") {
-      const body = extractUserText(msg.content);
-      if (!body) continue;
-      events.push({ kind: "user_message", id: baseId, ts, body });
-      continue;
-    }
-    // Tool results land as their own top-level message with role "toolResult".
-    // We don't render them as a standalone row — collapseToolPairs in the
-    // client matches them by tool_call_id to flip the prior tool_call from
-    // spinner → check.
-    if (msg.role === "toolResult") {
-      const callId = msg.toolCallId ?? "";
-      const name = msg.toolName ?? "tool";
-      const ok = !msg.isError;
-      const summary = summarizeToolResult(msg.content);
-      if (callId) {
-        events.push({
-          kind: "tool_result",
-          id: baseId,
-          ts,
-          tool_call_id: callId,
-          name,
-          summary,
-          ok,
-        });
-      }
-      continue;
-    }
-    if (msg.role !== "assistant") continue;
-
-    // Assistant: content is an array of parts. Each part becomes one event.
-    const parts = Array.isArray(msg.content) ? msg.content : [];
-    let partIdx = 0;
-    for (const part of parts) {
-      const partId = `${baseId}:${partIdx++}`;
-      if (typeof part === "string") {
-        if (part.trim()) {
-          events.push({ kind: "assistant_text", id: partId, ts, body: part });
-        }
-        continue;
-      }
-      if (part?.type === "text") {
-        const text = (part.text ?? "").trim();
-        if (text) {
-          events.push({ kind: "assistant_text", id: partId, ts, body: text });
-        }
-        continue;
-      }
-      if (part?.type === "toolCall") {
-        const callId = part.id ?? partId;
-        const name = part.name ?? "tool";
-        const label = formatToolLabel(name, part.arguments ?? part.input);
-        events.push({
-          kind: "tool_call",
-          id: partId,
-          ts,
-          tool_call_id: callId,
-          name,
-          label,
-        });
-        continue;
-      }
-      if (part?.type === "toolResult") {
-        const callId = part.toolCallId ?? part.tool_call_id ?? partId;
-        const name = part.name ?? "tool";
-        const ok = !(part.isError ?? part.is_error ?? false);
-        const summary = summarizeToolResult(part.content ?? part.output);
-        events.push({
-          kind: "tool_result",
-          id: partId,
-          ts,
-          tool_call_id: callId,
-          name,
-          summary,
-          ok,
-        });
-        continue;
-      }
-    }
+    events.push(...rawEntryToEvents(entry, `${entry.id ?? "anon"}-${lineIdx++}`));
   }
 
   return { events, byteOffset: newByteOffset, fileSize: size };
+}
+
+/**
+ * Convert one raw JSONL entry (or session.message broadcast payload) into
+ * the TranscriptEvents we render. Extracted so the SSE re-attach bridge
+ * (which receives `session.message` events from the gateway) can produce
+ * the same shapes the polling path already emits.
+ */
+export function rawEntryToEvents(entry: RawEntry, baseId: string): TranscriptEvent[] {
+  const events: TranscriptEvent[] = [];
+  const ts =
+    typeof entry.timestamp === "string"
+      ? Date.parse(entry.timestamp)
+      : typeof entry.timestamp === "number"
+        ? entry.timestamp
+        : 0;
+
+  if (entry.type !== "message") {
+    events.push({ kind: "unknown", id: baseId, ts, raw_type: entry.type ?? "?" });
+    return events;
+  }
+  const msg = entry.message;
+  if (!msg) return events;
+
+  if (msg.role === "user") {
+    const body = extractUserText(msg.content);
+    if (!body) return events;
+    events.push({ kind: "user_message", id: baseId, ts, body });
+    return events;
+  }
+  if (msg.role === "toolResult") {
+    const callId = msg.toolCallId ?? "";
+    const name = msg.toolName ?? "tool";
+    const ok = !msg.isError;
+    const summary = summarizeToolResult(msg.content);
+    if (callId) {
+      events.push({
+        kind: "tool_result",
+        id: baseId,
+        ts,
+        tool_call_id: callId,
+        name,
+        summary,
+        ok,
+      });
+    }
+    return events;
+  }
+  if (msg.role !== "assistant") return events;
+
+  const parts = Array.isArray(msg.content) ? msg.content : [];
+  let partIdx = 0;
+  for (const part of parts) {
+    const partId = `${baseId}:${partIdx++}`;
+    if (typeof part === "string") {
+      if (part.trim()) {
+        events.push({ kind: "assistant_text", id: partId, ts, body: part });
+      }
+      continue;
+    }
+    if (part?.type === "text") {
+      const text = (part.text ?? "").trim();
+      if (text) {
+        events.push({ kind: "assistant_text", id: partId, ts, body: text });
+      }
+      continue;
+    }
+    if (part?.type === "toolCall") {
+      const callId = part.id ?? partId;
+      const name = part.name ?? "tool";
+      const label = formatToolLabel(name, part.arguments ?? part.input);
+      events.push({
+        kind: "tool_call",
+        id: partId,
+        ts,
+        tool_call_id: callId,
+        name,
+        label,
+      });
+      continue;
+    }
+    if (part?.type === "toolResult") {
+      const callId = part.toolCallId ?? part.tool_call_id ?? partId;
+      const name = part.name ?? "tool";
+      const ok = !(part.isError ?? part.is_error ?? false);
+      const summary = summarizeToolResult(part.content ?? part.output);
+      events.push({
+        kind: "tool_result",
+        id: partId,
+        ts,
+        tool_call_id: callId,
+        name,
+        summary,
+        ok,
+      });
+      continue;
+    }
+  }
+  return events;
 }
 
 function extractUserText(content: RawMessage["content"]): string {
