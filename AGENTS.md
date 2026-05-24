@@ -58,6 +58,7 @@ Skills under `seo/`, `google-ads/`, `meta-ads/`, `gemini/`, and `notfair-upgrade
 | Intent | Skill | Path |
 |---|---|---|
 | Upgrade NotFair to the latest version | `upgrade` | `notfair-upgrade-skill/SKILL.md` |
+| Open the local NotFair CMO portal (browser UI for marketing agents) | `cmo` | `notfair-cmo-skill/SKILL.md` |
 
 ---
 

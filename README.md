@@ -1,4 +1,4 @@
-# NotFair
+# NotFair (formerly Toprank)
 
 [![Discord](https://img.shields.io/badge/Discord-Join%20the%20community-5865F2?logo=discord&logoColor=white)](https://discord.gg/gVJCRczpps)
 
@@ -15,6 +15,48 @@ The NotFair plugin is the CLI side — the skills that run inside Claude Code (a
 > *"How do I get more conversions without spending more?"*
 
 Free, open-source. Install in 30 seconds.
+
+### Or run it as a local app — [`notfair-cmo/`](notfair-cmo/)
+
+Prefer a local UI over the CLI? **[notfair-cmo](notfair-cmo/)** is a Node app that runs entirely on your machine and orchestrates the same NotFair skills as specialist agents (CMO, Google Ads, SEO) per project. Chat with them, schedule their recurring work, watch tool calls stream inline. Bring your own LLM credentials and your own ad-platform OAuth — nothing leaves your machine.
+
+#### Prerequisites
+
+- **[OpenClaw](https://docs.openclaw.ai/install)** installed and the gateway running on this machine (`openclaw gateway`).
+- **Node 20+** (Node 24 recommended).
+- An LLM provider configured in your OpenClaw config (e.g. an `OPENAI_API_KEY` env var or `agents.defaults.model` entry).
+
+#### Run it
+
+From inside Claude Code, if you have the plugin installed:
+
+```
+/notfair:cmo
+```
+
+The skill probes whether the portal is already running, runs `notfair-cmo doctor` to verify your environment, then launches the server in the background and opens `http://127.0.0.1:3000/` in your browser.
+
+Or from your shell directly:
+
+```bash
+# One-shot, no install:
+npx notfair-cmo@latest doctor      # verify env (Node, OpenClaw, LLM, data dir, port)
+npx notfair-cmo@latest             # launch UI on http://127.0.0.1:3000
+
+# Or install globally:
+npm install -g notfair-cmo
+notfair-cmo
+```
+
+#### What you get
+
+- Per-project specialist agents (CMO, Google Ads, SEO) auto-provisioned in isolated OpenClaw workspaces.
+- A chat UI scoped to each project with inline streaming of tool calls and MCP invocations.
+- A **Crons** tab (calendar + list) that groups OpenClaw's scheduled jobs by project + agent.
+- **Connections** — one-click PKCE OAuth to bring Google Ads (and other NotFair MCP servers) into the agents' toolbox.
+- An append-only **Activity log** of every autonomous decision and scheduled run.
+
+See [`notfair-cmo/README.md`](notfair-cmo/README.md) for full docs.
 
 ---
 

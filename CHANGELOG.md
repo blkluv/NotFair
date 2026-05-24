@@ -11,6 +11,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.25.0] — 2026-05-24
+
+### Added
+
+- **`notfair-cmo/`** — open-sourced the local CMO portal as a sibling project in this repo. Node app (Next.js) that runs on `http://127.0.0.1:3000`, orchestrates specialist marketing agents (CMO, Google Ads, SEO) per project, exposes chat + cron + activity log + MCP connections. Distributed via npm as `notfair-cmo`. Each project gets its own OpenClaw workspace under `~/.notfair-cmo/agents/`. Source: [`notfair-cmo/README.md`](notfair-cmo/README.md).
+- **`/notfair:cmo`** — new slash command. Probes `http://127.0.0.1:3000`; if not running, runs `notfair-cmo doctor`, then `npx notfair-cmo@latest start` detached, then opens the browser. Supports a custom port (`/notfair:cmo --port 4001`). Source: [`notfair-cmo-skill/SKILL.md`](notfair-cmo-skill/SKILL.md).
+
+The plugin and the CMO portal share the same skills engine but ship through different channels (Claude Code marketplace vs npm) and on independent release cadences. The plugin's `VERSION` and `notfair-cmo/package.json` version are intentionally decoupled.
+
+---
+
 ## [0.24.0] — 2026-05-24
 
 ### ⚠️ Breaking — plugin renamed `toprank` → `notfair`
