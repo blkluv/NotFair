@@ -16,50 +16,6 @@ The NotFair plugin is the CLI side — the skills that run inside Claude Code (a
 
 Free, open-source. Install in 30 seconds.
 
-### Or run it as a local app — [`notfair-cmo/`](notfair-cmo/)
-
-Prefer a local UI over the CLI? **[notfair-cmo](notfair-cmo/)** is a Node app that runs entirely on your machine and orchestrates the same NotFair skills as specialist agents (CMO, Google Ads, SEO) per project. Chat with them, schedule their recurring work, watch tool calls stream inline. Bring your own LLM credentials and your own ad-platform OAuth — nothing leaves your machine.
-
-#### Prerequisites
-
-- **[OpenClaw](https://docs.openclaw.ai/install)** installed and the gateway running on this machine (`openclaw gateway`).
-- **Node 20+** (Node 24 recommended).
-- An LLM provider configured in your OpenClaw config (e.g. an `OPENAI_API_KEY` env var or `agents.defaults.model` entry).
-
-#### Run it
-
-From inside Claude Code, if you have the plugin installed:
-
-```
-/notfair:cmo
-```
-
-The skill probes whether the portal is already running, runs `notfair-cmo doctor` to verify your environment, then launches the server in the background and opens `http://127.0.0.1:3000/` in your browser.
-
-Or from your shell directly:
-
-```bash
-# One-shot, no install:
-npx notfair-cmo@latest doctor      # verify env (Node, OpenClaw, LLM, data dir, port)
-npx notfair-cmo@latest             # launch UI on http://127.0.0.1:3000
-
-# Or install globally:
-npm install -g notfair-cmo
-notfair-cmo
-```
-
-#### What you get
-
-- Per-project specialist agents (CMO, Google Ads, SEO) auto-provisioned in isolated OpenClaw workspaces.
-- A chat UI scoped to each project with inline streaming of tool calls and MCP invocations.
-- A **Crons** tab (calendar + list) that groups OpenClaw's scheduled jobs by project + agent.
-- **Connections** — one-click PKCE OAuth to bring Google Ads (and other NotFair MCP servers) into the agents' toolbox.
-- An append-only **Activity log** of every autonomous decision and scheduled run.
-
-See [`notfair-cmo/README.md`](notfair-cmo/README.md) for full docs.
-
----
-
 ## See It Work
 
 ### Google Ads
@@ -204,27 +160,6 @@ The plugin was renamed `toprank` → `notfair` in v0.24.0. If you previously ins
 
 Your data is preserved — the runtime state directory (`~/.toprank/`, holding portfolio state, change logs, business-context cache, audit history) is intentionally retained under its original name for this release. See `CHANGELOG.md` for details.
 
----
-
-## 🤖 The Fully-Automated SEO Agent (OpenClaw / Hermes)
-
-Instead of manually running single SEO skills, the future of NotFair is the **Fully-Automated SEO Agent**.
-
-By leveraging the **OpenClaw adaptive layer** under [`openclaw/`](openclaw/), you can instruct OpenClaw or Hermes to automatically set up a persistent SEO agent for your project. This isn't just a set of tools—it's a background worker that configures cron jobs, continually monitors your site, runs SEO audits, and autonomously makes improvements over time.
-
-Features of the SEO Agent:
-- **Zero-Touch Setup:** Simply give the repo to OpenClaw or Hermes, and they will follow the instructions to spin up the agent for you.
-- **Always-On Automation:** Automatically schedules and runs SEO tasks via cron.
-- **Self-Improving:** Continuously monitors Search Console data, ships page optimizations, rewrites meta tags, and adds structured data without manual intervention.
-- **Multi-Site Portfolio:** Maintains portfolio state, a per-site work folder, OpenClaw wrapper skills, and structured JSON artifacts for reviews, plans, and feedback.
-
-Start building your agent here:
-
-- [`openclaw/README.md`](openclaw/README.md)
-- [`docs/openclaw-adaptive-layer.md`](docs/openclaw-adaptive-layer.md)
-
----
-
 ## Skills
 
 ### Google Ads
@@ -297,7 +232,6 @@ notfair/
 │   ├── geo-optimizer/           <- GEO for AI search engines
 │   └── setup-cms/               <- CMS connector
 ├── gemini/                      <- cross-model review via Gemini CLI
-├── openclaw/                    <- OpenClaw adaptive layer (multi-site wrappers, artifacts, installers)
 ├── notfair-upgrade-skill/       <- self-updater
 ├── test/                        <- unit + LLM-judge eval tests
 └── VERSION

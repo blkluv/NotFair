@@ -11,6 +11,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.25.3] — 2026-05-28
+
+### Removed
+
+- Removed the legacy OpenClaw adaptive layer, including repo-local orchestrator skills, cron/install scripts, schemas, examples, runtime helpers, and OpenClaw-specific tests.
+- Removed the OpenClaw-backed `/notfair:cmo` launch skill from the Claude Code plugin manifest and public resolver.
+
+### Changed
+
+- Updated public install and resolver docs to describe the remaining host-agnostic NotFair skill surface for Claude Code, Codex, and Hermes.
+
+---
+
 ## [0.25.2] — 2026-05-24
 
 ### Fixed
