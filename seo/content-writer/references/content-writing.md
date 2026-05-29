@@ -45,6 +45,29 @@ Google evaluates content on four axes:
 
 **YMYL topics** (health, finance, safety, legal) require the highest E-E-A-T bar.
 
+### High-Stakes Factual & Compliance Topics
+Some SEO topics are not legally YMYL but still create real-world risk if the
+answer is wrong: travel requirements, government paperwork, animal welfare,
+health certificates, military reimbursement, taxes/fees, regulated products, and
+anything with official deadlines or eligibility rules.
+
+For these topics, apply a compliance-quality gate before publishing:
+- Link directly to the current official source for each rule-making body
+  involved, such as government agencies, regulators, standards bodies, airlines,
+  or program owners.
+- Separate official requirements from professional planning advice. Do not use
+  soft language like "may be required" for a normally mandatory step unless the
+  official source actually defines meaningful exceptions.
+- Name timing windows, exceptions, and scope boundaries explicitly. If guidance
+  applies only to entry, import, export, one country, one state, or one program,
+  do not generalize it to the reverse direction or adjacent workflows.
+- Include a freshness caveat that tells readers to verify official guidance
+  before booking, filing, buying, or traveling.
+- If the page includes a calculator, estimator, or checklist, encode known rule
+  adjustments and caveats in the tool itself, not only in surrounding prose.
+- Treat unsourced compliance claims, ambiguous requirements, or missing official
+  links as blockers, not polish items.
+
 ---
 
 ## Helpful Content Signals
@@ -215,6 +238,18 @@ list. Example:
 - Width: 1200px (featured), 800–1000px (inline), 2x for retina
 - Lazy-load every image except the featured one
 
+### Media and Asset Quality
+- Use real, relevant visual assets for published pages when the topic benefits
+  from illustration, inspection, or trust. Avoid purely decorative stock-like
+  images that do not help the reader understand the product, place, process, or
+  outcome.
+- Validate generated image files after export. The file extension, MIME/file
+  signature, dimensions, and metadata declarations must agree.
+- Keep hero images reasonably sized for web delivery. Prefer WebP/AVIF photos at
+  the displayed aspect ratio; oversized multi-megabyte source images are a
+  technical UX issue, not just an asset issue.
+- Open Graph image dimensions in metadata must match the actual asset.
+
 ---
 
 ## Landing Pages
@@ -312,7 +347,9 @@ that format — don't fight the SERP.
 - [ ] Primary keyword in first 100 words naturally
 - [ ] Internal links to 3-5 related pages
 - [ ] Images have descriptive alt text
+- [ ] Image file signatures, dimensions, and metadata match the published assets
 - [ ] URL is short, readable, includes keyword slug
+- [ ] Compliance-sensitive claims are backed by official sources and scoped correctly
 
 ### Should-Have
 - [ ] Structured data (Article, Product, Service, HowTo, FAQPage)

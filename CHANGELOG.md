@@ -11,6 +11,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.25.4] — 2026-05-28
+
+### Changed
+
+- Strengthened SEO content-quality guidance for compliance-sensitive claims, official-source citation requirements, internal links, and image asset validation.
+
+---
+
 ## [0.25.3] — 2026-05-28
 
 ### Removed

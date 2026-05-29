@@ -88,12 +88,15 @@ Includes:
 - first-hand proof, examples, reviews, local details, pricing context
 - author/site trust signals where relevant
 - freshness only when substance changes
+- official-source grounding and precise scope for regulated, safety, travel,
+  reimbursement, health, or other compliance-sensitive topics
 
 Typical actions:
 - add missing information users need to decide
 - replace generic copy with specific proof
 - add comparison, pricing, process, FAQs, or service-area details when useful
 - prune or merge thin/duplicative content
+- fix ambiguous or unsourced compliance language before publishing
 
 Do not confuse with: metadata. If the page itself does not satisfy intent, title tweaks are lipstick.
 
@@ -128,12 +131,15 @@ Includes:
 - intrusive interstitials/dialogs
 - ad or layout clutter
 - main-content clarity
+- image asset correctness: actual format matches extension, dimensions match
+  metadata, and images are compressed to the rendered size
 
 Typical actions:
 - improve LCP/INP/CLS bottlenecks
 - remove intrusive blockers
 - fix mobile layout issues
 - make primary content and CTA obvious
+- convert oversized or mislabeled generated assets before publishing
 
 Do not confuse with: ranking magic. Perfect Lighthouse scores do not compensate for weak intent/content.
 
