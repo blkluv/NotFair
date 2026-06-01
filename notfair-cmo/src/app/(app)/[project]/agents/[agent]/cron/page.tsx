@@ -17,23 +17,11 @@ import type { ScheduleInput } from "@/server/actions/cron-runs";
 
 const NUM_DAYS = 14;
 
-/**
- * Narrow the loose `CronSchedule` shape from OpenClaw to the discriminated
- * union our run-matching server action accepts. Drops schedules whose `kind`
- * we don't recognise so the action can fall back to time-window matching.
- */
 function scheduleForCalendar(s: unknown): ScheduleInput | null {
   if (!s || typeof s !== "object") return null;
-  const obj = s as { kind?: string; expr?: unknown; tz?: unknown; everyMs?: unknown; anchorMs?: unknown };
+  const obj = s as { kind?: string; expr?: unknown; tz?: unknown };
   if (obj.kind === "cron" && typeof obj.expr === "string") {
     return { kind: "cron", expr: obj.expr, ...(typeof obj.tz === "string" ? { tz: obj.tz } : {}) };
-  }
-  if (obj.kind === "every" && typeof obj.everyMs === "number") {
-    return {
-      kind: "every",
-      everyMs: obj.everyMs,
-      ...(typeof obj.anchorMs === "number" ? { anchorMs: obj.anchorMs } : {}),
-    };
   }
   return null;
 }

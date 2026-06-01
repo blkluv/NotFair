@@ -25,7 +25,6 @@ import { scheduleCronAction } from "@/server/actions/crons";
 import { toast } from "sonner";
 
 type Specialist = "cmo" | "google_ads" | "seo";
-type ScheduleKind = "cron" | "every";
 
 const SPECIALIST_LABEL: Record<Specialist, string> = {
   cmo: "CMO",
@@ -39,20 +38,19 @@ type Props = {
   variant?: "button" | "icon";
 };
 
-const PRESET_SCHEDULES: Array<{ label: string; kind: ScheduleKind; value: string; tz?: string }> = [
-  { label: "Every hour", kind: "every", value: "1h" },
-  { label: "Every 15 minutes", kind: "every", value: "15m" },
-  { label: "Daily at 9am (Los Angeles)", kind: "cron", value: "0 9 * * *", tz: "America/Los_Angeles" },
-  { label: "Weekdays at 8am (Los Angeles)", kind: "cron", value: "0 8 * * 1-5", tz: "America/Los_Angeles" },
-  { label: "Mondays at 6am (Los Angeles)", kind: "cron", value: "0 6 * * 1", tz: "America/Los_Angeles" },
+const PRESET_SCHEDULES: Array<{ label: string; value: string; tz?: string }> = [
+  { label: "Every hour", value: "0 * * * *", tz: "America/Los_Angeles" },
+  { label: "Every 15 minutes", value: "*/15 * * * *", tz: "America/Los_Angeles" },
+  { label: "Daily at 9am (Los Angeles)", value: "0 9 * * *", tz: "America/Los_Angeles" },
+  { label: "Weekdays at 8am (Los Angeles)", value: "0 8 * * 1-5", tz: "America/Los_Angeles" },
+  { label: "Mondays at 6am (Los Angeles)", value: "0 6 * * 1", tz: "America/Los_Angeles" },
 ];
 
 export function ScheduleCronDialog({ projectSlug, defaultSpecialist, variant = "button" }: Props) {
   const [open, setOpen] = useState(false);
   const [specialist, setSpecialist] = useState<Specialist>(defaultSpecialist ?? "google_ads");
   const [name, setName] = useState("");
-  const [kind, setKind] = useState<ScheduleKind>("every");
-  const [scheduleValue, setScheduleValue] = useState("1h");
+  const [scheduleValue, setScheduleValue] = useState("0 9 * * *");
   const [tz, setTz] = useState("America/Los_Angeles");
   const [brief, setBrief] = useState("");
   const [pending, start] = useTransition();
@@ -60,12 +58,10 @@ export function ScheduleCronDialog({ projectSlug, defaultSpecialist, variant = "
   function reset() {
     setName("");
     setBrief("");
-    setKind("every");
-    setScheduleValue("1h");
+    setScheduleValue("0 9 * * *");
   }
 
   function pickPreset(p: (typeof PRESET_SCHEDULES)[number]) {
-    setKind(p.kind);
     setScheduleValue(p.value);
     if (p.tz) setTz(p.tz);
   }
@@ -76,9 +72,9 @@ export function ScheduleCronDialog({ projectSlug, defaultSpecialist, variant = "
         project_slug: projectSlug,
         specialist,
         name,
-        schedule_kind: kind,
+        schedule_kind: "cron",
         schedule_value: scheduleValue,
-        tz: kind === "cron" ? tz : undefined,
+        tz,
         brief,
       });
       if (!result.ok) {
@@ -166,34 +162,21 @@ export function ScheduleCronDialog({ projectSlug, defaultSpecialist, variant = "
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
-            <div className="flex gap-2">
-              <select
-                value={kind}
-                onChange={(e) => setKind(e.target.value as ScheduleKind)}
-                className="h-9 w-32 rounded-md border bg-background px-2 text-sm"
-                disabled={pending}
-              >
-                <option value="every">Every</option>
-                <option value="cron">Cron expr</option>
-              </select>
-              <Input
-                id="schedule"
-                placeholder={kind === "every" ? "1h" : "0 9 * * *"}
-                value={scheduleValue}
-                onChange={(e) => setScheduleValue(e.target.value)}
-                disabled={pending}
-                className="font-mono text-sm"
-              />
-            </div>
-            {kind === "cron" && (
-              <Input
-                placeholder="Timezone (IANA)"
-                value={tz}
-                onChange={(e) => setTz(e.target.value)}
-                disabled={pending}
-                className="font-mono text-sm"
-              />
-            )}
+            <Input
+              id="schedule"
+              placeholder="0 9 * * *"
+              value={scheduleValue}
+              onChange={(e) => setScheduleValue(e.target.value)}
+              disabled={pending}
+              className="font-mono text-sm"
+            />
+            <Input
+              placeholder="Timezone (IANA)"
+              value={tz}
+              onChange={(e) => setTz(e.target.value)}
+              disabled={pending}
+              className="font-mono text-sm"
+            />
           </div>
 
           <div className="grid gap-2">

@@ -57,7 +57,7 @@ export default async function AgentSkillsPage({
         )}
 
         {!error && skills.length > 0 && (
-          <SkillsList skills={skills} agentSlug={agentSlug} />
+          <SkillsList skills={skills} />
         )}
       </div>
     </div>

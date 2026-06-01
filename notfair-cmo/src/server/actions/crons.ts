@@ -18,7 +18,7 @@ export type ScheduleCronInput = {
   project_slug: string;
   specialist: AgentTemplate["key"];
   name: string;
-  schedule_kind: "cron" | "every";
+  schedule_kind: "cron";
   schedule_value: string;
   tz?: string;
   brief: string;
@@ -51,18 +51,6 @@ export async function scheduleCronAction(input: ScheduleCronInput): Promise<Sche
   }
   const agent_slug = target.slug;
   const agent_full_id = target.agent_id;
-
-  // The native scheduler only models cron expressions; "every N" inputs come
-  // in as `every 5m` strings which we transcribe to a cron expression with
-  // the equivalent step. For brevity (and since the CMO/specialists rarely
-  // emit non-cron schedules), reject `every` here for now — emitters should
-  // pass a real cron expression.
-  if (input.schedule_kind !== "cron") {
-    return {
-      ok: false,
-      error: "Only cron expressions are supported; use a 5-field cron string.",
-    };
-  }
 
   try {
     const result = await createCron({
