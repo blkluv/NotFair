@@ -1,5 +1,6 @@
 import { findMcpToken } from "@/server/mcp/tokens";
 import { mcpSpecByKey } from "@/server/mcp-catalog";
+import { refreshMcpToken, isExpiringSoon } from "./refresh";
 
 /**
  * Shared MCP HTTP plumbing. Two callers use this today:
@@ -162,6 +163,59 @@ export async function mcpRpc<T = unknown>(
   cleanup();
 
   return parseRpcBody<T>(body);
+}
+
+/**
+ * `mcpRpc` with silent refresh-token handling. Looks up the token row by
+ * (project_slug, catalog_key), proactively refreshes when the access token
+ * is within ~60s of expiry, calls `mcpRpc`, and on HTTP 401 attempts a
+ * single refresh + retry before giving up.
+ *
+ * Returns the same `RpcResult<T>` shape as `mcpRpc` so callers don't need a
+ * new error branch. When refresh isn't possible (legacy rows without
+ * refresh_token, or upstream rejects the refresh), the original 401 result
+ * is returned and the caller's existing stale-token UX kicks in.
+ */
+export async function mcpRpcAutoRefresh<T = unknown>(
+  project_slug: string,
+  catalog_key: string,
+  method: string,
+  params: Record<string, unknown> = {},
+  opts: McpRpcOpts = {},
+): Promise<RpcResult<T>> {
+  const spec = mcpSpecByKey(project_slug, catalog_key);
+  if (!spec) {
+    return { ok: false, kind: "http_error", status: 404, body: "unknown mcp catalog key" };
+  }
+  let token = findMcpToken(project_slug, catalog_key);
+  if (!token) {
+    return { ok: false, kind: "http_error", status: 401, body: "no token stored" };
+  }
+
+  if (isExpiringSoon(token)) {
+    const refreshed = await refreshMcpToken(token);
+    if (refreshed) token = refreshed;
+  }
+
+  const first = await mcpRpc<T>(
+    spec.resource_url,
+    token.access_token_enc,
+    method,
+    params,
+    opts,
+  );
+  if (first.ok) return first;
+  if (first.kind !== "http_error" || first.status !== 401) return first;
+
+  // Reactive refresh. Skip if we just refreshed proactively — the upstream
+  // is telling us our fresh token is bad, and looping would burn cycles.
+  // `updated_at` is bumped by updateMcpTokenSecrets, so we can detect a
+  // refresh that happened within this same call.
+  if (Date.parse(token.updated_at) > Date.now() - 5_000) return first;
+
+  const refreshed = await refreshMcpToken(token);
+  if (!refreshed) return first;
+  return mcpRpc<T>(spec.resource_url, refreshed.access_token_enc, method, params, opts);
 }
 
 function parseRpcBody<T>(body: string): RpcResult<T> {

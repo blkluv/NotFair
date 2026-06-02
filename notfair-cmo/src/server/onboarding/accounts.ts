@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { getMcpConfig, mcpRpc } from "@/server/mcp/rpc";
+import { getMcpConfig, mcpRpcAutoRefresh } from "@/server/mcp/rpc";
 import { getProject, setProjectGoogleAdsAccount } from "@/server/db/projects";
 import type { Project } from "@/types";
 
@@ -54,9 +54,9 @@ export async function listGoogleAdsAccounts(
     };
   }
 
-  const rpcResult = await mcpRpc<ListAccountsToolResult>(
-    cfg.url,
-    cfg.token,
+  const rpcResult = await mcpRpcAutoRefresh<ListAccountsToolResult>(
+    project_slug,
+    MCP_CATALOG_KEY,
     "tools/call",
     { name: "listConnectedAccounts", arguments: {} },
     { timeoutMs: LIST_TIMEOUT_MS },

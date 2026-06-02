@@ -1,5 +1,17 @@
 # notfair-cmo
 
+## 0.4.1 — 2026-06-01
+
+**Silent OAuth refresh for MCP connections.** The Connections page stopped flapping to "token expired" every hour for providers with short-lived access tokens (Stripe, Mixpanel, Supabase, PostHog). The MCP OAuth callback used to discard the `refresh_token`, `expires_in`, and `scope` fields from the token-endpoint response and store only the access token — so when the upstream rotated it (~1h for most providers), the only recovery path was a manual "Reconnect" click.
+
+The callback now captures the full token envelope and persists the token endpoint + DCR-issued `client_id` / `client_secret` alongside it (new migration `013`). A new `mcpRpcAutoRefresh` wrapper proactively swaps an expiring access token (within 60s) and reactively retries once on HTTP 401, rotating the stored pair when the provider issues a new refresh token (RFC 6749 §6).
+
+Existing token rows (created before this release) have no refresh token captured, so they continue to fall through to the existing reconnect-on-401 UX. After one fresh reconnect they pick up silent refresh.
+
+**Probe + tool-list + onboarding's account picker** now route through `mcpRpcAutoRefresh`, so the status badge, the View tools dialog, and Google Ads account selection all stay green across the access-token TTL boundary instead of flashing stale_token between refreshes.
+
+**Stripe (and any AS that gates refresh tokens on client capability) now issues one.** Dynamic client registration now advertises `grant_types: ["authorization_code", "refresh_token"]` per [SEP-2207](https://modelcontextprotocol.io/seps/2207-oidc-refresh-token-guidance). Without it, Stripe's MCP authorization server returned only an access token at consent time — forcing a manual reconnect every ~1h. After this change, reconnecting Stripe captures a refresh token alongside the access token, and silent rotation works the same as it does for Supabase and Mixpanel.
+
 ## 0.4.0 — 2026-05-31
 
 Redesigned Connections page + curated "Browse connectors" UX. The catalog now ships with a small directory of trusted MCPs you opt into; clicking a tile adds it to the project and starts OAuth in one step. The page itself was rebuilt as an editorial list with a top-right "Add server" menu.

@@ -137,18 +137,14 @@ export async function listMcpToolsAction(input: {
   if (!project) {
     return { ok: false, error: "No active project." };
   }
-  const { getMcpConfig, mcpRpc } = await import("@/server/mcp/rpc");
+  const { getMcpConfig, mcpRpcAutoRefresh } = await import("@/server/mcp/rpc");
   const cfg = getMcpConfig(project.slug, input.mcp_key);
   if (!cfg) {
     return { ok: false, error: "MCP is not configured for this project." };
   }
-  const r = await mcpRpc<{ tools?: Array<{ name?: unknown; description?: unknown; inputSchema?: unknown }> }>(
-    cfg.url,
-    cfg.token,
-    "tools/list",
-    {},
-    { timeoutMs: 5_000 },
-  );
+  const r = await mcpRpcAutoRefresh<{
+    tools?: Array<{ name?: unknown; description?: unknown; inputSchema?: unknown }>;
+  }>(project.slug, input.mcp_key, "tools/list", {}, { timeoutMs: 5_000 });
   if (!r.ok) {
     const message =
       r.kind === "http_error"
@@ -561,10 +557,19 @@ async function dynamicRegister(
   // require a confidential client; for those we register as
   // `client_secret_post` — the AS returns a client_secret which the
   // callback then sends alongside the code at token exchange.
+  //
+  // grant_types includes `refresh_token` per SEP-2207 ("OIDC-Flavored
+  // Refresh Token Guidance", accepted 2026-02-04). Some Authorization
+  // Servers (notably Stripe's MCP) only issue refresh tokens to clients
+  // that explicitly register the capability — without this we still get
+  // a working access token but the user is forced to reconnect when it
+  // expires (~1h for Stripe). Servers that don't support refresh_token
+  // grant either ignore the extra entry or reject it; in the latter case
+  // we'd fall back to the authorization_code-only registration anyway.
   const body = {
     client_name: "notfair-cmo",
     redirect_uris: [redirect_uri],
-    grant_types: ["authorization_code"],
+    grant_types: ["authorization_code", "refresh_token"],
     response_types: ["code"],
     token_endpoint_auth_method: auth_method,
   };

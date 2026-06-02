@@ -63,7 +63,12 @@ export async function GET(request: Request) {
   });
   if (pending.client_secret) body.set("client_secret", pending.client_secret);
 
-  let access_token: string;
+  let tokenEnvelope: {
+    access_token: string;
+    refresh_token?: string;
+    expires_in?: number;
+    scope?: string;
+  };
   try {
     const res = await fetch(pending.token_endpoint, {
       method: "POST",
@@ -81,12 +86,22 @@ export async function GET(request: Request) {
       );
       return NextResponse.redirect(back);
     }
-    const parsed = JSON.parse(text) as { access_token?: string };
+    const parsed = JSON.parse(text) as {
+      access_token?: string;
+      refresh_token?: string;
+      expires_in?: number;
+      scope?: string;
+    };
     if (!parsed.access_token) {
       back.searchParams.set("mcp_error", "Token endpoint returned no access_token.");
       return NextResponse.redirect(back);
     }
-    access_token = parsed.access_token;
+    tokenEnvelope = {
+      access_token: parsed.access_token,
+      refresh_token: parsed.refresh_token,
+      expires_in: parsed.expires_in,
+      scope: parsed.scope,
+    };
   } catch (err) {
     back.searchParams.set(
       "mcp_error",
@@ -95,8 +110,30 @@ export async function GET(request: Request) {
     return NextResponse.redirect(back);
   }
 
+  // Compute absolute expiry only when the provider advertised expires_in.
+  // For providers that omit it (rare, but legal under RFC 6749), we leave
+  // expires_at NULL and rely on reactive refresh-on-401.
+  const expires_at =
+    typeof tokenEnvelope.expires_in === "number"
+      ? new Date(Date.now() + tokenEnvelope.expires_in * 1000).toISOString()
+      : undefined;
+
   try {
-    await setMcpBearer(pending.project_slug, pending.catalog_key, access_token);
+    await setMcpBearer(
+      pending.project_slug,
+      pending.catalog_key,
+      tokenEnvelope.access_token,
+      {
+        refresh_token: tokenEnvelope.refresh_token,
+        expires_at,
+        scope: tokenEnvelope.scope,
+        // Stash everything the refresh helper needs so it can rotate the
+        // access token later without bouncing through consent again.
+        token_endpoint: pending.token_endpoint,
+        client_id: pending.client_id,
+        client_secret: pending.client_secret,
+      },
+    );
   } catch (err) {
     const raw = err instanceof Error ? err.message : String(err);
     // Scrub bearers + any oat_ token shape before exposing in the URL —

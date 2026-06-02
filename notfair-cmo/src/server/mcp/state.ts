@@ -1,6 +1,6 @@
 import { findMcpToken, upsertMcpToken, deleteMcpToken } from "./tokens";
 import { mcpSpecByKey } from "@/server/mcp-catalog";
-import { mcpRpc } from "./rpc";
+import { mcpRpcAutoRefresh } from "./rpc";
 
 /**
  * Status surface for the Connections page + dashboard banners.
@@ -41,10 +41,14 @@ export async function getMcpStatus(
   if (!spec) return { state: "not_configured" };
   const token = findMcpToken(project_slug, catalog_key);
   if (!token) return { state: "not_configured" };
-  return probe(spec.resource_url, token.access_token_enc);
+  return probe(project_slug, catalog_key, spec.resource_url);
 }
 
-async function probe(url: string, token: string): Promise<McpRuntimeStatus> {
+async function probe(
+  project_slug: string,
+  catalog_key: string,
+  url: string,
+): Promise<McpRuntimeStatus> {
   const last_checked_at = new Date().toISOString();
   // Use `initialize` — the spec-mandated first call — as the liveness
   // probe. Some MCP servers (Supabase) reject `tools/list` with HTTP 400
@@ -52,9 +56,13 @@ async function probe(url: string, token: string): Promise<McpRuntimeStatus> {
   // accepted as the opening message. We don't track the session ID since
   // we're not following up with another call in the probe; tool count
   // gets surfaced on demand via the View tools dialog (its own RPC).
-  const r = await mcpRpc<unknown>(
-    url,
-    token,
+  //
+  // Goes through `mcpRpcAutoRefresh` so an expired access token gets
+  // silently swapped for a fresh one instead of flapping the status to
+  // "stale_token" on every page load.
+  const r = await mcpRpcAutoRefresh<unknown>(
+    project_slug,
+    catalog_key,
     "initialize",
     {
       protocolVersion: "2025-06-18",
@@ -116,7 +124,14 @@ export async function setMcpBearer(
   project_slug: string,
   catalog_key: string,
   token: string,
-  options: { scope?: string; expires_at?: string } = {},
+  options: {
+    scope?: string;
+    expires_at?: string;
+    refresh_token?: string;
+    token_endpoint?: string;
+    client_id?: string;
+    client_secret?: string;
+  } = {},
 ): Promise<void> {
   upsertMcpToken({
     project_slug,
@@ -124,5 +139,9 @@ export async function setMcpBearer(
     access_token: token,
     scope: options.scope,
     expires_at: options.expires_at,
+    refresh_token: options.refresh_token,
+    token_endpoint: options.token_endpoint,
+    client_id: options.client_id,
+    client_secret: options.client_secret,
   });
 }

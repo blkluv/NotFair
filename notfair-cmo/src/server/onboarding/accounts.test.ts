@@ -7,6 +7,10 @@ const mcpRpcMock = vi.fn();
 vi.mock("@/server/mcp/rpc", () => ({
   getMcpConfig: (...args: unknown[]) => getMcpConfigMock(...args),
   mcpRpc: (...args: unknown[]) => mcpRpcMock(...args),
+  // The action wraps `mcpRpc` in an auto-refresh helper that resolves the
+  // token from the DB; tests don't exercise refresh, so we route the
+  // wrapper to the same underlying mock for simplicity.
+  mcpRpcAutoRefresh: (...args: unknown[]) => mcpRpcMock(...args),
 }));
 
 const getProjectMock = vi.fn();
