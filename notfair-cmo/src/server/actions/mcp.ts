@@ -370,7 +370,11 @@ export async function removeUserMcpServerAction(input: {
       const agents = await listProjectAgents(project.slug);
       for (const agent of agents) {
         try {
-          await adapter.unregisterMcp(input.mcp_key, agent.agent_id);
+          await adapter.unregisterMcp({
+            serverName: input.mcp_key,
+            projectSlug: project.slug,
+            agentId: agent.agent_id,
+          });
         } catch {
           // best-effort
         }

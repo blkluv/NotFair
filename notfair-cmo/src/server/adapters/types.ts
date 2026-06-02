@@ -118,5 +118,14 @@ export interface HarnessAdapter {
   provisionAgent(spec: AgentProvisionSpec): Promise<void>;
 
   registerMcp(spec: McpRegistrationSpec): Promise<void>;
-  unregisterMcp(serverName: string, agentId: string): Promise<void>;
+  unregisterMcp(spec: McpUnregistrationSpec): Promise<void>;
+}
+
+export interface McpUnregistrationSpec {
+  /** Logical server name. */
+  serverName: string;
+  /** Project slug — Codex's project-namespaced global config key. */
+  projectSlug: string;
+  /** Agent id — Claude Code's per-workspace `.mcp.json` lives under it. */
+  agentId: string;
 }

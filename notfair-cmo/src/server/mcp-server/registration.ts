@@ -1,9 +1,10 @@
 import { requireAdapter } from "@/server/adapters/registry";
-import { getProject } from "@/server/db/projects";
+import { getProject, listProjects } from "@/server/db/projects";
 import { listProjectAgents } from "@/server/agent-meta";
 import { mcpSpecByKey } from "@/server/mcp-catalog";
 import { findMcpToken } from "@/server/mcp/tokens";
 import { getOrCreateMcpServerSecret } from "./secret";
+import type { HarnessAdapterId } from "@/server/adapters/types";
 
 /**
  * Register notfair-cmo's outbound MCP server (`notfair-orchestration`) with
@@ -28,6 +29,39 @@ function defaultMcpUrl(): string {
   return `http://127.0.0.1:${port}/api/mcp/orchestration`;
 }
 
+/**
+ * One-shot per-process cleanup of legacy per-agent + dead-project rows in
+ * `~/.codex/config.toml`. Per-project namespacing landed in 0.4.x; older
+ * installs still have `[mcp_servers.notfair_<agentId>__...]` headers from
+ * before the switch, which keep showing up when an agent introspects its
+ * tools. Strip them once on the first registration we run after start.
+ *
+ * Claude Code's per-workspace `.mcp.json` doesn't have this problem, so
+ * the prune is no-op for that adapter.
+ */
+let codexPruneRan = false;
+async function maybePruneCodexOrphans(adapterId: HarnessAdapterId): Promise<void> {
+  if (adapterId !== "codex-local" || codexPruneRan) return;
+  codexPruneRan = true;
+  try {
+    const { pruneOrphanCodexNamespaces } = await import(
+      "@/server/adapters/codex-local/mcp"
+    );
+    const slugs = new Set(
+      listProjects({ includeArchived: true }).map((p) => p.slug),
+    );
+    const removed = await pruneOrphanCodexNamespaces(slugs);
+    if (removed > 0) {
+      console.info(
+        `[mcp] pruned ${removed} orphan notfair_* section(s) from ~/.codex/config.toml`,
+      );
+    }
+  } catch (err) {
+    // Best-effort. A broken prune must not block actual registration.
+    console.warn("[mcp] codex orphan prune failed:", err);
+  }
+}
+
 export type InstallResult =
   | { ok: true; key: string; url: string }
   | { ok: false; key: string; url: string; error: string };
@@ -43,6 +77,7 @@ export async function registerOrchestrationForAgent(
   }
   try {
     const adapter = requireAdapter(project.harness_adapter);
+    await maybePruneCodexOrphans(adapter.id);
     await adapter.registerMcp({
       serverName: ORCHESTRATION_MCP_KEY,
       agentId: agent_id,
@@ -107,6 +142,7 @@ export async function registerCatalogMcpForAgent(
   }
   try {
     const adapter = requireAdapter(project.harness_adapter);
+    await maybePruneCodexOrphans(adapter.id);
     await adapter.registerMcp({
       serverName: catalog_key,
       agentId: agent_id,

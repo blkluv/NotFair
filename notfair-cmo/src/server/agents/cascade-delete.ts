@@ -107,13 +107,18 @@ export async function cascadeDeleteProjectArtifacts(project_slug: string): Promi
   const agents = await listProjectAgents(project_slug);
 
   // Unregister any MCP servers the adapter wrote into its config (so codex
-  // global config doesn't leak agent-namespaced rows for deleted agents).
+  // global config doesn't leak rows for deleted projects, and claude-code
+  // workspaces don't reference dead bearers).
   if (adapter) {
     const catalog = getMcpCatalog(project_slug);
     for (const agent of agents) {
       for (const spec of catalog) {
         try {
-          await adapter.unregisterMcp(spec.key, agent.agent_id);
+          await adapter.unregisterMcp({
+            serverName: spec.key,
+            projectSlug: project_slug,
+            agentId: agent.agent_id,
+          });
         } catch {
           // best-effort
         }

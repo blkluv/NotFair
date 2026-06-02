@@ -39,6 +39,7 @@ afterEach(() => {
 // Imported after the mock so the in-memory fs is the one the module uses.
 import {
   CODEX_BEARER_ENV_VAR,
+  pruneOrphanCodexNamespaces,
   registerCodexMcp,
   unregisterCodexMcp,
 } from "./mcp";
@@ -65,7 +66,7 @@ describe("registerCodexMcp (http)", () => {
     await registerCodexMcp(makeHttpSpec());
     const toml = fsState.files.get("/codex/config.toml") ?? "";
     expect(toml).toContain(
-      `[mcp_servers.notfair_acme_cmo_greg__notfair_orchestration]`,
+      `[mcp_servers.notfair_acme__notfair_orchestration]`,
     );
     expect(toml).toContain(
       `url = "http://127.0.0.1:3326/api/mcp/orchestration"`,
@@ -102,21 +103,38 @@ describe("registerCodexMcp (http)", () => {
     await registerCodexMcp(makeHttpSpec());
     const toml = fsState.files.get("/codex/config.toml") ?? "";
     const matches = toml.match(
-      /\[mcp_servers\.notfair_acme_cmo_greg__notfair_orchestration\]/g,
+      /\[mcp_servers\.notfair_acme__notfair_orchestration\]/g,
     );
     expect(matches?.length).toBe(1);
   });
 
-  it("namespaces by agent id so two agents don't collide", async () => {
-    await registerCodexMcp(makeHttpSpec({ agentId: "acme-cmo-greg" }));
-    await registerCodexMcp(makeHttpSpec({ agentId: "acme-google-ads-ana" }));
+  it("namespaces by project slug so two projects don't collide", async () => {
+    await registerCodexMcp(makeHttpSpec({ projectSlug: "acme" }));
+    await registerCodexMcp(makeHttpSpec({ projectSlug: "globex" }));
     const toml = fsState.files.get("/codex/config.toml") ?? "";
     expect(toml).toContain(
-      `[mcp_servers.notfair_acme_cmo_greg__notfair_orchestration]`,
+      `[mcp_servers.notfair_acme__notfair_orchestration]`,
     );
     expect(toml).toContain(
-      `[mcp_servers.notfair_acme_google_ads_ana__notfair_orchestration]`,
+      `[mcp_servers.notfair_globex__notfair_orchestration]`,
     );
+  });
+
+  it("collapses two agents in the same project into one shared entry", async () => {
+    await registerCodexMcp(
+      makeHttpSpec({ projectSlug: "acme", agentId: "acme-cmo-greg" }),
+    );
+    await registerCodexMcp(
+      makeHttpSpec({ projectSlug: "acme", agentId: "acme-google-ads-ana" }),
+    );
+    const toml = fsState.files.get("/codex/config.toml") ?? "";
+    const matches = toml.match(
+      /\[mcp_servers\.notfair_acme__notfair_orchestration\]/g,
+    );
+    expect(matches?.length).toBe(1);
+    // No per-agent suffixes left in the file from either registration.
+    expect(toml).not.toContain("notfair_acme_cmo_greg__");
+    expect(toml).not.toContain("notfair_acme_google_ads_ana__");
   });
 });
 
@@ -142,12 +160,101 @@ describe("registerCodexMcp (stdio)", () => {
 });
 
 describe("unregisterCodexMcp", () => {
-  it("removes only the matching section", async () => {
-    await registerCodexMcp(makeHttpSpec({ agentId: "acme-cmo-greg" }));
-    await registerCodexMcp(makeHttpSpec({ agentId: "acme-google-ads-ana" }));
-    await unregisterCodexMcp("notfair-orchestration", "acme-cmo-greg");
+  it("removes only the matching project's section", async () => {
+    await registerCodexMcp(makeHttpSpec({ projectSlug: "acme" }));
+    await registerCodexMcp(makeHttpSpec({ projectSlug: "globex" }));
+    await unregisterCodexMcp("notfair-orchestration", "acme");
     const toml = fsState.files.get("/codex/config.toml") ?? "";
+    expect(toml).not.toContain("notfair_acme__");
+    expect(toml).toContain("notfair_globex__");
+  });
+});
+
+describe("pruneOrphanCodexNamespaces", () => {
+  it("strips legacy per-agent sections (prefix is an agent id, not a project slug)", async () => {
+    // Hand-write a config that looks like what an upgraded 0.3.x install
+    // would have: per-agent prefixes from before per-project namespacing.
+    fsState.files.set(
+      "/codex/config.toml",
+      [
+        `[mcp_servers.notfair_acme_cmo_greg__notfair_orchestration]`,
+        `url = "http://x"`,
+        ``,
+        `[mcp_servers.notfair_acme_google_ads_ana__notfair_orchestration]`,
+        `url = "http://x"`,
+        ``,
+        `[mcp_servers.notfair_acme__notfair_orchestration]`,
+        `url = "http://x"`,
+        ``,
+      ].join("\n"),
+    );
+    const removed = await pruneOrphanCodexNamespaces(new Set(["acme"]));
+    expect(removed).toBe(2);
+    const toml = fsState.files.get("/codex/config.toml") ?? "";
+    expect(toml).toContain("notfair_acme__notfair_orchestration");
     expect(toml).not.toContain("notfair_acme_cmo_greg__");
-    expect(toml).toContain("notfair_acme_google_ads_ana__");
+    expect(toml).not.toContain("notfair_acme_google_ads_ana__");
+  });
+
+  it("strips sections for deleted projects", async () => {
+    fsState.files.set(
+      "/codex/config.toml",
+      [
+        `[mcp_servers.notfair_acme__notfair_orchestration]`,
+        `url = "http://x"`,
+        ``,
+        `[mcp_servers.notfair_oldproject__notfair_orchestration]`,
+        `url = "http://x"`,
+        ``,
+      ].join("\n"),
+    );
+    const removed = await pruneOrphanCodexNamespaces(new Set(["acme"]));
+    expect(removed).toBe(1);
+    const toml = fsState.files.get("/codex/config.toml") ?? "";
+    expect(toml).toContain("notfair_acme__");
+    expect(toml).not.toContain("notfair_oldproject__");
+  });
+
+  it("leaves user-installed non-notfair servers alone", async () => {
+    fsState.files.set(
+      "/codex/config.toml",
+      [
+        `[mcp_servers.user_linear]`,
+        `command = "linear-mcp"`,
+        ``,
+        `[mcp_servers.notfair_dead__notfair_orchestration]`,
+        `url = "http://x"`,
+        ``,
+      ].join("\n"),
+    );
+    const removed = await pruneOrphanCodexNamespaces(new Set(["acme"]));
+    expect(removed).toBe(1);
+    const toml = fsState.files.get("/codex/config.toml") ?? "";
+    expect(toml).toContain(`[mcp_servers.user_linear]`);
+    expect(toml).toContain(`command = "linear-mcp"`);
+    expect(toml).not.toContain("notfair_dead__");
+  });
+
+  it("normalizes dashed slugs to underscored prefixes before comparing", async () => {
+    fsState.files.set(
+      "/codex/config.toml",
+      [
+        `[mcp_servers.notfair_acme_co__notfair_orchestration]`,
+        `url = "http://x"`,
+        ``,
+      ].join("\n"),
+    );
+    // Project slug uses a dash; namespace prefix uses underscore.
+    const removed = await pruneOrphanCodexNamespaces(new Set(["acme-co"]));
+    expect(removed).toBe(0);
+    expect(fsState.files.get("/codex/config.toml")).toContain(
+      "notfair_acme_co__",
+    );
+  });
+
+  it("is a no-op when the config file is absent", async () => {
+    const removed = await pruneOrphanCodexNamespaces(new Set(["acme"]));
+    expect(removed).toBe(0);
+    expect(fsState.files.has("/codex/config.toml")).toBe(false);
   });
 });

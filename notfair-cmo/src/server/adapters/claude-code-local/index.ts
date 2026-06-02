@@ -6,6 +6,7 @@ import type {
   HarnessEvent,
   AgentProvisionSpec,
   McpRegistrationSpec,
+  McpUnregistrationSpec,
 } from "../types";
 import { executeClaudeCodeLocal } from "./execute";
 import { provisionClaudeCodeAgent } from "./provision";
@@ -32,7 +33,7 @@ export const claudeCodeLocalAdapter: HarnessAdapter = {
   async registerMcp(spec: McpRegistrationSpec): Promise<void> {
     await registerClaudeCodeMcp(workspaceDirFor(spec.agentId), spec);
   },
-  async unregisterMcp(serverName: string, agentId: string): Promise<void> {
-    await unregisterClaudeCodeMcp(workspaceDirFor(agentId), serverName);
+  async unregisterMcp(spec: McpUnregistrationSpec): Promise<void> {
+    await unregisterClaudeCodeMcp(workspaceDirFor(spec.agentId), spec.serverName);
   },
 };

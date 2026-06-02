@@ -4,6 +4,7 @@ import type {
   HarnessEvent,
   AgentProvisionSpec,
   McpRegistrationSpec,
+  McpUnregistrationSpec,
 } from "../types";
 import { executeCodexLocal } from "./execute";
 import { provisionCodexAgent } from "./provision";
@@ -22,7 +23,7 @@ export const codexLocalAdapter: HarnessAdapter = {
   async registerMcp(spec: McpRegistrationSpec): Promise<void> {
     await registerCodexMcp(spec);
   },
-  async unregisterMcp(serverName: string, agentId: string): Promise<void> {
-    await unregisterCodexMcp(serverName, agentId);
+  async unregisterMcp(spec: McpUnregistrationSpec): Promise<void> {
+    await unregisterCodexMcp(spec.serverName, spec.projectSlug);
   },
 };

@@ -5,12 +5,25 @@ import { join } from "node:path";
 import type { McpRegistrationSpec } from "../types";
 
 /**
- * Per-agent MCP wiring for Codex.
+ * Project-scoped MCP wiring for Codex.
  *
- * Codex reads MCP servers from `~/.codex/config.toml`. notfair-cmo wants
- * project-scoped tokens, but codex's MCP config is global, so we namespace
- * server names with the agent id: `<serverName>__<agentId>`. The
- * orchestration MCP that needs to know the agent context can read that.
+ * Codex reads MCP servers from `~/.codex/config.toml` — a single global file
+ * shared across every project and agent on the machine. MCP tokens in
+ * notfair-cmo are project-scoped (one (project, server) pair → one bearer
+ * shared by every agent in the project), so we namespace by project slug:
+ * `notfair_<projectSlug>__<serverName>`. Every agent in the same project
+ * sees the same entry; sibling projects don't duplicate.
+ *
+ * Earlier versions namespaced by agent id, which produced N entries per
+ * project (one per agent) and let agents see each other's prefixes when
+ * Codex enumerated the global config. Per-project namespacing collapses
+ * that to one entry per project per server.
+ *
+ * Cross-project visibility in the global config is a residual: an agent in
+ * project A can still see `notfair_B__*` headers because Codex reads the
+ * whole file. Fully isolating that would require pointing CODEX_HOME at a
+ * per-project path, which would also break the user's `~/.codex/auth.json`
+ * login. Left as a future change.
  *
  * We rewrite the [mcp_servers.*] sections under our namespace prefix; we
  * never touch user-installed servers outside our prefix.
@@ -25,8 +38,8 @@ function codexConfigPath(): string {
 
 const NOTFAIR_NS = "notfair_";
 
-function namespaced(serverName: string, agentId: string): string {
-  return `${NOTFAIR_NS}${agentId.replace(/-/g, "_")}__${serverName.replace(/[^a-zA-Z0-9]/g, "_")}`;
+function namespaced(serverName: string, projectSlug: string): string {
+  return `${NOTFAIR_NS}${projectSlug.replace(/-/g, "_")}__${serverName.replace(/[^a-zA-Z0-9]/g, "_")}`;
 }
 
 async function readConfig(): Promise<string> {
@@ -86,7 +99,7 @@ export function bearerEnvVarForServer(serverName: string): string {
 export const CODEX_BEARER_ENV_VAR = "NOTFAIR_ORCHESTRATION_BEARER";
 
 function renderServer(spec: McpRegistrationSpec): string {
-  const header = `[mcp_servers.${namespaced(spec.serverName, spec.agentId)}]`;
+  const header = `[mcp_servers.${namespaced(spec.serverName, spec.projectSlug)}]`;
   if (spec.transport.type === "stdio") {
     const lines = [
       header,
@@ -127,17 +140,63 @@ function tomlInlineTable(record: Record<string, string>): string {
 export async function registerCodexMcp(spec: McpRegistrationSpec): Promise<void> {
   await mkdir(codexConfigDir(), { recursive: true });
   let toml = await readConfig();
-  toml = stripSection(toml, `mcp_servers.${namespaced(spec.serverName, spec.agentId)}`);
+  toml = stripSection(toml, `mcp_servers.${namespaced(spec.serverName, spec.projectSlug)}`);
   toml = toml.trimEnd() + "\n\n" + renderServer(spec);
   await writeFile(codexConfigPath(), toml.trimStart(), "utf8");
 }
 
 export async function unregisterCodexMcp(
   serverName: string,
-  agentId: string,
+  projectSlug: string,
 ): Promise<void> {
   let toml = await readConfig();
   if (!toml) return;
-  toml = stripSection(toml, `mcp_servers.${namespaced(serverName, agentId)}`);
+  toml = stripSection(toml, `mcp_servers.${namespaced(serverName, projectSlug)}`);
   await writeFile(codexConfigPath(), toml.trimStart(), "utf8");
+}
+
+/**
+ * Strip `[mcp_servers.notfair_<prefix>__<server>]` sections from the global
+ * Codex config when `<prefix>` is not the slug of any currently-known
+ * project. Catches two kinds of orphans:
+ *
+ *   1. Legacy per-agent entries written before per-project namespacing
+ *      (`notfair_demo1_cmo_greg__notfair_googleads`) — the prefix is an
+ *      agent id, not a project slug.
+ *   2. Entries from projects that have since been deleted without going
+ *      through cascade-delete (manual db edits, crashes mid-delete).
+ *
+ * Returns the number of sections removed. Best-effort: leaves the file
+ * untouched on parse errors.
+ */
+export async function pruneOrphanCodexNamespaces(
+  activeProjectSlugs: ReadonlySet<string>,
+): Promise<number> {
+  const toml = await readConfig();
+  if (!toml) return 0;
+  // Project slugs in the namespace use `_` where the slug uses `-`, so
+  // normalize both sides for comparison.
+  const validPrefixes = new Set(
+    Array.from(activeProjectSlugs, (s) => s.replace(/-/g, "_")),
+  );
+  // Match `[mcp_servers.notfair_<prefix>__<rest>]` and capture the prefix.
+  // The prefix is greedy-up-to-the-final-`__` so multi-underscore agent ids
+  // (`acme_cmo_greg`) collapse to one capture.
+  const headerRe = /\[mcp_servers\.notfair_([A-Za-z0-9_]+?)__[A-Za-z0-9_]+\]/g;
+  const orphans = new Set<string>();
+  for (const m of toml.matchAll(headerRe)) {
+    const prefix = m[1];
+    if (!validPrefixes.has(prefix)) {
+      // Strip the leading `[mcp_servers.` + trailing `]` to get the section
+      // header `stripSection` expects.
+      orphans.add(m[0].slice(1, -1));
+    }
+  }
+  if (orphans.size === 0) return 0;
+  let next = toml;
+  for (const section of orphans) {
+    next = stripSection(next, section);
+  }
+  await writeFile(codexConfigPath(), next.trimStart(), "utf8");
+  return orphans.size;
 }
