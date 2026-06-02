@@ -37,9 +37,32 @@ interface CodexEvent {
     id?: string;
     command?: string;
     arguments?: Record<string, unknown>;
+    /**
+     * Fields specific to `mcp_tool_call` items in codex 0.13x+. The
+     * gateway invokes a registered MCP server's tool and emits the
+     * server/tool pair separately from the generic `name` slot.
+     */
+    server?: string;
+    tool?: string;
+    tool_name?: string;
   };
   error?: { message?: string };
 }
+
+/**
+ * Item type ids codex emits for things we want to surface as "tool"
+ * events in the UI. Centralized so the started/completed branches stay
+ * in sync — historically they drifted, missing newer types like
+ * `mcp_tool_call` (added in codex 0.132+) which left MCP invocations
+ * silently invisible in the chat.
+ */
+const TOOLISH_ITEM_TYPES = new Set([
+  "command_execution",
+  "tool_call",
+  "function_call",
+  "mcp_tool_call",
+  "mcp_call",
+]);
 
 export function parseCodexLine(
   line: string,
@@ -67,10 +90,8 @@ export function parseCodexLine(
 
   if (event.type === "item.started" && event.item) {
     const item = event.item;
-    if (item.type === "command_execution" || item.type === "tool_call") {
-      const rawName = item.name ?? item.command ?? "tool";
-      // Keep name single-line; multi-line commands belong in the label.
-      const toolName = rawName.split("\n")[0];
+    if (item.type && TOOLISH_ITEM_TYPES.has(item.type)) {
+      const toolName = nameForToolishItem(item);
       events.push({
         kind: "tool",
         phase: "start",
@@ -91,12 +112,12 @@ export function parseCodexLine(
         state.emittedTextLen = state.assistantText.length;
         events.push({ kind: "delta", text: delta });
       }
-    } else if (item.type === "command_execution" || item.type === "tool_call") {
+    } else if (item.type && TOOLISH_ITEM_TYPES.has(item.type)) {
       events.push({
         kind: "tool",
         phase: "result",
         toolCallId: item.id ?? "",
-        name: item.name ?? item.command ?? "tool",
+        name: nameForToolishItem(item),
       });
     }
     return events;
@@ -123,6 +144,50 @@ export function parseCodexLine(
   }
 
   return events;
+}
+
+/**
+ * Derive the canonical tool `name` field the UI will see for any codex
+ * item type we route through as a tool event. The shape matters: the
+ * chat client maps the name to (a) an icon, (b) a humanized verb,
+ * (c) an MCP brand favicon. Conventions:
+ *
+ *   - `mcp_tool_call` / `mcp_call` items get `<server>.<tool>` so the
+ *     UI's `<server>.<tool>` matcher resolves the server brand from
+ *     the project's MCP catalog. The codex namespace prefix
+ *     (`notfair_<projectSlug>__<serverName>`) is what `server` carries
+ *     — the matcher already strips the project prefix.
+ *   - Shell-style `command_execution` items lose their raw command from
+ *     the name (it would render as garbage in the UI) — name becomes
+ *     a stable `"shell"` token, and the command stays in the label.
+ *   - Generic `tool_call` / `function_call` items keep their declared
+ *     `name` so unknown function tools surface their real identifier.
+ *   - Items missing every signal degrade to `"tool"`.
+ */
+function nameForToolishItem(item: {
+  type?: string;
+  name?: string;
+  command?: string;
+  server?: string;
+  tool?: string;
+  tool_name?: string;
+}): string {
+  if (item.type === "mcp_tool_call" || item.type === "mcp_call") {
+    const server = item.server ?? "";
+    const tool = item.tool ?? item.tool_name ?? item.name ?? "tool";
+    if (server) return `${server}.${tool}`;
+    return tool;
+  }
+  if (item.type === "command_execution") {
+    // Shell items expose only `command`; we want the chat UI to see a
+    // stable `"shell"` slug rather than the raw command (which produces
+    // garbage verbs like "Called md\"" after the tool-name humanizer
+    // splits on dots in the command).
+    return "shell";
+  }
+  // tool_call / function_call / fallthrough.
+  const raw = item.name ?? item.tool ?? item.tool_name ?? (item.command ? "shell" : "tool");
+  return raw.split("\n")[0]!;
 }
 
 function labelForCodexInput(

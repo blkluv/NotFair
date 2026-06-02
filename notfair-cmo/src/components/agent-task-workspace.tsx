@@ -16,7 +16,7 @@ import { ApprovalCard } from "@/components/approval-card";
 import { QuestionCard } from "@/components/question-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { LiveTranscript } from "@/components/live-transcript";
+import { LiveTranscript, type McpCatalogEntryLite } from "@/components/live-transcript";
 import { Markdown } from "@/components/markdown";
 import { RunningDot } from "@/components/running-dot";
 import { StartAllTasksButton } from "@/components/start-all-tasks-button";
@@ -96,6 +96,9 @@ type Props = {
   tasks: Task[];
   selected: SelectedTaskBundle | null;
   proposedCount: number;
+  /** MCP catalog forwarded to the per-task LiveTranscript so tool calls
+   *  that resolve to an MCP server render the server's brand favicon. */
+  mcpCatalog?: McpCatalogEntryLite[];
 };
 
 export function AgentTaskWorkspace({
@@ -106,6 +109,7 @@ export function AgentTaskWorkspace({
   tasks,
   selected,
   proposedCount,
+  mcpCatalog,
 }: Props) {
   const router = useRouter();
   const search = useSearchParams();
@@ -280,6 +284,7 @@ export function AgentTaskWorkspace({
                 agentSlug={agentSlug}
                 agentDisplayName={agentDisplayName}
                 taskById={taskById}
+                mcpCatalog={mcpCatalog}
               />
             </div>
           </>
@@ -300,12 +305,14 @@ function SelectedTaskPanel({
   agentSlug,
   agentDisplayName,
   taskById,
+  mcpCatalog,
 }: {
   selected: SelectedTaskBundle;
   projectSlug: string;
   agentSlug: string;
   agentDisplayName: string;
   taskById: Map<string, Task>;
+  mcpCatalog?: McpCatalogEntryLite[];
 }) {
   const router = useRouter();
   const isInFlight = TASK_IN_FLIGHT.includes(selected.task.status);
@@ -430,6 +437,7 @@ function SelectedTaskPanel({
           autoKickoff={selected.kickoff !== null}
           kickoffMessage={selected.kickoff?.message}
           taskId={selected.kickoff?.taskId}
+          mcpCatalog={mcpCatalog}
         />
       </div>
     </div>

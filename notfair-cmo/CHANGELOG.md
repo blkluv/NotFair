@@ -1,5 +1,19 @@
 # notfair-cmo
 
+## 0.4.3 — 2026-06-02
+
+**Humanized tool-call rendering in the chat transcript.** The chat used to show every shell call as the raw command — long `/bin/zsh -lc "rg --files ..."` lines splatted right under the assistant's reasoning, with both the tool group's `name` and `label` rendering the same incantation. Visually noisy and didn't tell the user anything they couldn't infer from the prose above it.
+
+The transcript now leads with the *intent*. A new `humanizeTool` helper unwraps `bash -lc`-style shell wrappers, inspects the leading binary, and maps it to a verb phrase: `rg`/`grep` → "Searched files", `git status` → "Ran git status", `cat`/`head`/`tail` → "Read file", `pwd` → "Checked working directory", and so on. Built-in tools (Read/Write/Edit/fetch) and MCP tool names (`mcp__notfair-googleads__listAdAccounts` → "Called list ad accounts") get the same treatment. The raw command stays in the expandable body for power users; the small mono identifier (`shell`, `runScript`, etc.) lives on the row as a debug tag.
+
+Codex `command_execution` items are also re-tagged from `name: "<first line of command>"` to `name: "shell"`, so icon lookup hits Terminal correctly and the working indicator stops reading "Calling /bin/zsh -lc …".
+
+**MCP tool calls now stream into the transcript at all.** Codex 0.132+ surfaces MCP invocations as a distinct `mcp_tool_call` item type (separate from `command_execution` and `tool_call`), and our parser was only handling the older two. Net effect: every MCP call the CMO and Google Ads agents fired was silently dropped from the chat — the conversation jumped straight from "I'll query the account" to the prose summary with nothing visible in between. Parser now consumes `mcp_tool_call` (and `mcp_call` / `function_call` for completeness) and emits a `<server>.<tool>` name so the catalog matcher can resolve the brand.
+
+**MCP brand favicons next to tool calls.** When a tool name resolves to a known MCP server in the project's catalog — matched via Claude Code's `mcp__<key>__<tool>` namespace, Codex's `notfair_<proj>__<server>__<tool>` namespace, or the `mcp_tool_call` `<namespaced-server>.<tool>` shape (the matcher peels the `notfair_<proj>__` prefix to find the bare server key) — the row renders the server's brand favicon (via `t3.gstatic.com/faviconV2`) instead of the generic Wrench icon. Falls back gracefully to Wrench when the favicon misses or the catalog has no match.
+
+The chat page and the per-agent task workspace both forward the project's catalog to `LiveTranscript`; `agent-task-workspace` gained a `mcpCatalog` prop that passes straight through.
+
 ## 0.4.2 — 2026-06-01
 
 **TTL cache on MCP probe results.** Every server render of `/connections` (and the chat thread page's notfair-googleads banner) used to fan out one `initialize` JSON-RPC call per connector to verify liveness. With six connectors that was six round-trips on every page load — fine for one user dogfooding, rude to upstreams as usage grows.

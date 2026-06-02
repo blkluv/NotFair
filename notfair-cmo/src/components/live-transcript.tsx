@@ -27,6 +27,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Markdown } from "@/components/markdown";
+import { brandDomain } from "@/components/mcp-icon";
 import { RunningDot } from "@/components/running-dot";
 import {
   WorkingIndicator,
@@ -71,6 +72,17 @@ function eventSignature(e: TranscriptEvent): string {
       return `${e.kind}|${e.id}`;
   }
 }
+
+/**
+ * Minimum catalog shape the chat needs to render an MCP server's brand icon
+ * next to its tool calls. Mirrors `McpSpec` from `mcp-catalog.ts` — we
+ * accept the broader type but only use these fields here.
+ */
+export type McpCatalogEntryLite = {
+  key: string;
+  display_name: string;
+  resource_url: string;
+};
 
 type Props = {
   projectSlug: string;
@@ -120,6 +132,14 @@ type Props = {
    * returns 409 when the claim fails; we treat that as a benign no-op.
    */
   taskId?: string;
+  /**
+   * MCP servers known to this project. The chat uses this to (a) detect
+   * when a tool call belongs to an MCP server (vs. a shell / built-in
+   * tool) and (b) render the server's brand favicon next to the call.
+   * Optional — when omitted, MCP tool calls fall back to the generic
+   * Wrench icon.
+   */
+  mcpCatalog?: McpCatalogEntryLite[];
 };
 
 /** Module-level guard so React StrictMode dev double-mounts don't double-fire. */
@@ -139,6 +159,7 @@ export function LiveTranscript({
   autoKickoff = false,
   kickoffMessage,
   taskId,
+  mcpCatalog,
 }: Props) {
   const router = useRouter();
   const [events, setEvents] = useState<TranscriptEvent[]>(initialEvents);
@@ -612,7 +633,7 @@ export function LiveTranscript({
             <ol className="space-y-4">
               {rendered.map((item) => (
                 <li key={item.key}>
-                  <RenderItem item={item} />
+                  <RenderItem item={item} mcpCatalog={mcpCatalog} />
                 </li>
               ))}
               {pendingUserMsg && (
@@ -622,7 +643,7 @@ export function LiveTranscript({
               )}
               {pendingTools.length > 0 && (
                 <li>
-                  <ToolGroup tools={pendingTools} />
+                  <ToolGroup tools={pendingTools} mcpCatalog={mcpCatalog} />
                 </li>
               )}
               {pendingAssistant && (
@@ -981,7 +1002,13 @@ function collapseEvents(events: TranscriptEvent[]): RenderedItem[] {
   return out;
 }
 
-function RenderItem({ item }: { item: RenderedItem }) {
+function RenderItem({
+  item,
+  mcpCatalog,
+}: {
+  item: RenderedItem;
+  mcpCatalog?: McpCatalogEntryLite[];
+}) {
   if (item.kind === "user_message") {
     const isKickoff =
       item.body.startsWith("(task assignment)") ||
@@ -999,7 +1026,7 @@ function RenderItem({ item }: { item: RenderedItem }) {
     return <AssistantText body={item.body} />;
   }
   if (item.kind === "tool_group") {
-    return <ToolGroup tools={item.tools} />;
+    return <ToolGroup tools={item.tools} mcpCatalog={mcpCatalog} />;
   }
   return null;
 }
@@ -1025,7 +1052,13 @@ function AssistantText({ body }: { body: string }) {
   );
 }
 
-function ToolGroup({ tools }: { tools: ToolEntry[] }) {
+function ToolGroup({
+  tools,
+  mcpCatalog,
+}: {
+  tools: ToolEntry[];
+  mcpCatalog?: McpCatalogEntryLite[];
+}) {
   const inFlightCount = tools.filter((t) => !t.done).length;
   const isLive = inFlightCount > 0;
   const headline =
@@ -1037,6 +1070,10 @@ function ToolGroup({ tools }: { tools: ToolEntry[] }) {
   // work" rather than punishing every recoverable hiccup.
   const lastDone = [...tools].reverse().find((t) => t.done);
   const hasError = !!(lastDone && !lastDone.ok);
+  const intent = headline
+    ? humanizeTool(headline.name, headline.label)
+    : { verb: "Tool call" };
+  const headMcp = headline ? matchMcpServerKey(headline.name, mcpCatalog) : null;
   const HeadIcon = headline ? iconForTool(headline.name) : Wrench;
   const StatusIcon = isLive
     ? Loader2
@@ -1063,13 +1100,20 @@ function ToolGroup({ tools }: { tools: ToolEntry[] }) {
       >
         <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" />
         <StatusIcon className={cn("size-3.5 shrink-0", statusClass)} />
-        <HeadIcon className="size-3.5 shrink-0 text-muted-foreground" />
-        <span className="font-mono text-[11px] font-medium text-foreground">
-          {headline ? headline.name : "tool"}
+        {headMcp ? (
+          <ToolBrandFavicon
+            resourceUrl={headMcp.resource_url}
+            alt={headMcp.display_name}
+          />
+        ) : (
+          <HeadIcon className="size-3.5 shrink-0 text-muted-foreground" />
+        )}
+        <span className="text-[12px] font-medium text-foreground">
+          {intent.verb}
         </span>
-        {headline?.label && (
-          <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
-            {headline.label}
+        {intent.target && (
+          <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
+            {intent.target}
           </span>
         )}
         <span className="ml-auto text-[10px] tabular-nums text-muted-foreground">
@@ -1080,23 +1124,31 @@ function ToolGroup({ tools }: { tools: ToolEntry[] }) {
                 ? "working"
                 : `${tools.length} steps · ${inFlightCount} live`}
             </span>
+          ) : tools.length === 1 ? (
+            <>1 step</>
           ) : (
-            <>
-              {tools.length} step{tools.length === 1 ? "" : "s"}
-            </>
+            <>{tools.length} steps</>
           )}
         </span>
       </summary>
-      <div className="space-y-1 border-t bg-background/40 px-3 py-2">
+      <div className="space-y-2 border-t bg-background/40 px-3 py-2">
         {tools.map((t) => (
-          <ToolRow key={t.toolCallId} entry={t} />
+          <ToolRow key={t.toolCallId} entry={t} mcpCatalog={mcpCatalog} />
         ))}
       </div>
     </details>
   );
 }
 
-function ToolRow({ entry }: { entry: ToolEntry }) {
+function ToolRow({
+  entry,
+  mcpCatalog,
+}: {
+  entry: ToolEntry;
+  mcpCatalog?: McpCatalogEntryLite[];
+}) {
+  const intent = humanizeTool(entry.name, entry.label);
+  const mcp = matchMcpServerKey(entry.name, mcpCatalog);
   const Icon = iconForTool(entry.name);
   const StatusIcon = entry.done
     ? entry.ok
@@ -1108,22 +1160,45 @@ function ToolRow({ entry }: { entry: ToolEntry }) {
       ? "text-emerald-600"
       : "text-destructive"
     : "text-muted-foreground motion-safe:animate-spin";
+  // Show the raw command/label only when it actually adds information —
+  // i.e. it's not redundant with the intent target the header already
+  // surfaces (path/url/etc.). Keeps simple tool rows tight while still
+  // exposing shell command lines and other raw invocations in full.
+  const showRawLabel =
+    !!entry.label &&
+    entry.label.trim() !== "" &&
+    entry.label.trim() !== intent.target?.trim();
   return (
-    <div className="space-y-0.5">
+    <div className="space-y-1">
       <div className="flex items-center gap-2 text-xs">
         <StatusIcon className={cn("size-3.5 shrink-0", statusClass)} />
-        <Icon className="size-3.5 shrink-0 text-muted-foreground" />
-        <span className="font-mono text-[11px] font-medium text-foreground">
-          {entry.name}
+        {mcp ? (
+          <ToolBrandFavicon
+            resourceUrl={mcp.resource_url}
+            alt={mcp.display_name}
+          />
+        ) : (
+          <Icon className="size-3.5 shrink-0 text-muted-foreground" />
+        )}
+        <span className="text-[12px] font-medium text-foreground">
+          {intent.verb}
         </span>
-        {entry.label && (
-          <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
-            {entry.label}
+        {intent.target && (
+          <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
+            {intent.target}
           </span>
         )}
+        <span className="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground/70">
+          {formatToolName(entry.name)}
+        </span>
       </div>
+      {showRawLabel && (
+        <pre className="ml-6 max-h-40 overflow-auto rounded bg-muted/60 px-2 py-1 font-mono text-[10.5px] leading-snug text-foreground/80 whitespace-pre-wrap break-all">
+          {entry.label}
+        </pre>
+      )}
       {entry.done && entry.result && (
-        <div className="pl-6 font-mono text-[11px] text-muted-foreground/90">
+        <div className="ml-6 font-mono text-[11px] text-muted-foreground/90">
           <span className="text-[10px] uppercase tracking-[0.18em]">
             {entry.ok ? "→ result" : "→ error"}
           </span>{" "}
@@ -1131,6 +1206,46 @@ function ToolRow({ entry }: { entry: ToolEntry }) {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Tiny inline favicon for an MCP tool row — sized to fit the same 3.5
+ * grid slot as the lucide icons next to it, so MCP and built-in tools
+ * align cleanly in the same column. Re-implements the brand-favicon
+ * fetch instead of using `<McpIcon>` directly because that component
+ * always wraps the image in a 9-unit muted square — too chunky for
+ * inline rendering in a dense tool row.
+ */
+function ToolBrandFavicon({
+  resourceUrl,
+  alt,
+}: {
+  resourceUrl: string;
+  alt: string;
+}) {
+  const [errored, setErrored] = useState(false);
+  let host: string | null = null;
+  try {
+    host = new URL(resourceUrl).hostname;
+  } catch {
+    host = null;
+  }
+  const brand = host ? brandDomain(host) : null;
+  if (!brand || errored) {
+    return <Wrench className="size-3.5 shrink-0 text-muted-foreground" />;
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={`https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://${brand}&size=16`}
+      alt={alt}
+      width={14}
+      height={14}
+      className="size-3.5 shrink-0 rounded-[3px]"
+      referrerPolicy="no-referrer"
+      onError={() => setErrored(true)}
+    />
   );
 }
 
@@ -1318,9 +1433,10 @@ function deriveWorkingView(input: {
   }
 
   if (pendingInFlightTool) {
+    const intent = humanizeTool(pendingInFlightTool.name, pendingInFlightTool.label);
     return {
-      headline: `Calling ${formatToolName(pendingInFlightTool.name)}`,
-      subtitle: pendingInFlightTool.label ?? null,
+      headline: intent.verb,
+      subtitle: intent.target ?? pendingInFlightTool.label ?? null,
       phases,
       mood: "tool",
     };
@@ -1344,7 +1460,7 @@ function deriveWorkingView(input: {
     return {
       headline: "Thinking",
       subtitle: lastDone
-        ? `${formatToolName(lastDone.name)} ${lastDone.ok ? "✓" : "failed"} — picking next step`
+        ? `${humanizeTool(lastDone.name, lastDone.label).verb} ${lastDone.ok ? "✓" : "failed"} — picking next step`
         : null,
       phases,
       mood: "waiting",
@@ -1367,19 +1483,24 @@ function deriveWorkingView(input: {
     };
   }
   if (inFlightCommittedToolCall) {
+    const intent = humanizeTool(
+      inFlightCommittedToolCall.name,
+      inFlightCommittedToolCall.label,
+    );
     return {
-      headline: `Calling ${formatToolName(inFlightCommittedToolCall.name)}`,
-      subtitle: inFlightCommittedToolCall.label ?? null,
+      headline: intent.verb,
+      subtitle: intent.target ?? inFlightCommittedToolCall.label ?? null,
       phases,
       mood: "tool",
     };
   }
   if (lastEvent.kind === "tool_result") {
+    const verb = humanizeTool(lastEvent.name, null).verb;
     return {
       headline: "Thinking",
       subtitle: lastEvent.ok
-        ? `${formatToolName(lastEvent.name)} ✓ — picking next step`
-        : `${formatToolName(lastEvent.name)} failed — retrying`,
+        ? `${verb} ✓ — picking next step`
+        : `${verb} failed — retrying`,
       phases,
       mood: "waiting",
     };
@@ -1399,7 +1520,8 @@ function subtitleForLastTool(
 ): string | null {
   const lastDonePending = [...pendingTools].reverse().find((t) => t.done);
   if (lastDonePending) {
-    return `${formatToolName(lastDonePending.name)} ${lastDonePending.ok ? "✓" : "failed"}`;
+    const verb = humanizeTool(lastDonePending.name, lastDonePending.label).verb;
+    return `${verb} ${lastDonePending.ok ? "✓" : "failed"}`;
   }
   const lastDoneCommitted = [...events]
     .reverse()
@@ -1407,7 +1529,8 @@ function subtitleForLastTool(
       e.kind === "tool_result",
     );
   if (lastDoneCommitted) {
-    return `${formatToolName(lastDoneCommitted.name)} ${lastDoneCommitted.ok ? "✓" : "failed"}`;
+    const verb = humanizeTool(lastDoneCommitted.name, null).verb;
+    return `${verb} ${lastDoneCommitted.ok ? "✓" : "failed"}`;
   }
   return null;
 }
@@ -1426,21 +1549,34 @@ function buildPhases(
   const seen = new Set<string>();
   const phases: WorkingPhase[] = [];
 
-  // Walk committed events to build phases in order.
+  // Walk committed events to build phases in order. Capture the `label`
+  // from the tool_call (where it lives) so the phase chip's intent
+  // matches what the inline ToolGroup row shows — without it, shell
+  // commands collapse to "Ran shell command" in the trajectory.
   const committedById = new Map<
     string,
-    { name: string; done: boolean; ok: boolean }
+    { name: string; label: string | null; done: boolean; ok: boolean }
   >();
   for (const e of events) {
     if (e.kind === "tool_call") {
-      committedById.set(e.tool_call_id, { name: e.name, done: false, ok: true });
+      committedById.set(e.tool_call_id, {
+        name: e.name,
+        label: e.label,
+        done: false,
+        ok: true,
+      });
     } else if (e.kind === "tool_result") {
       const prev = committedById.get(e.tool_call_id);
       if (prev) {
         prev.done = true;
         prev.ok = e.ok;
       } else {
-        committedById.set(e.tool_call_id, { name: e.name, done: true, ok: e.ok });
+        committedById.set(e.tool_call_id, {
+          name: e.name,
+          label: null,
+          done: true,
+          ok: e.ok,
+        });
       }
     }
   }
@@ -1448,7 +1584,7 @@ function buildPhases(
     seen.add(id);
     phases.push({
       id,
-      label: formatToolName(t.name),
+      label: humanizeTool(t.name, t.label).verb,
       state: !t.done ? "active" : t.ok ? "done" : "failed",
     });
   }
@@ -1456,11 +1592,12 @@ function buildPhases(
   // Then any SSE-pending tools the committed list doesn't have yet.
   for (const t of pendingTools) {
     if (seen.has(t.toolCallId)) continue;
+    const intent = humanizeTool(t.name, t.label);
     phases.push({
       id: t.toolCallId,
-      label: formatToolName(t.name),
+      label: intent.verb,
       state: !t.done ? "active" : t.ok ? "done" : "failed",
-      detail: t.label ?? null,
+      detail: intent.target ?? t.label ?? null,
     });
   }
 
@@ -1514,6 +1651,298 @@ function formatToolName(name: string): string {
     }
   }
   return name;
+}
+
+/**
+ * Human-readable intent for a tool call, used wherever we'd otherwise
+ * surface a raw command line or namespaced tool identifier in the chat.
+ *
+ * Two layers:
+ *   1. Shell-flavored names (`shell`, `bash`, `exec`, Claude's `Bash`):
+ *      unwrap the standard `bash -lc "..."` wrapper, look at the leading
+ *      binary, map common ones to verb phrases (`rg` → "Searched files",
+ *      `git status` → "Ran git status", …). Falls back to `Ran <bin>`.
+ *   2. Built-in coding tools (Read, Write, Edit, fetch, …) and MCP tool
+ *      names (`runScript`, `mcp__notfair__listAdAccounts`, …) get a
+ *      tailored verb based on the tool name, with the label surfaced as
+ *      the target detail (file path, URL, or short label string).
+ *
+ * The returned `verb` is what the collapsed tool group shows; `target`
+ * is the optional second-half detail truncated by the row's CSS. The
+ * raw command/label still lives in the expanded body so power users can
+ * see exactly what ran.
+ */
+type ToolIntent = { verb: string; target?: string };
+
+function humanizeTool(name: string, label: string | null): ToolIntent {
+  const n = (name ?? "").toLowerCase();
+  // Shell / exec — Codex (`shell`) and Claude Code (`Bash` / `bash` / `exec`).
+  // Also catches the legacy transcript rows the v0.4.2 parser left behind:
+  // old codex `command_execution` items stored the raw command's first
+  // line as BOTH name and label, so we sniff the name/label for the
+  // characteristic shell wrapper (`bash -lc "…"`, leading `/bin/zsh`,
+  // etc.) and route them through the shell humanizer too.
+  if (n === "shell" || n === "bash" || n === "exec" || looksLikeShellInvocation(name) || looksLikeShellInvocation(label ?? "")) {
+    // Prefer the label when present (newer events store the command
+    // there); fall back to the name for pre-fix rows where the command
+    // was written into the name field.
+    const cmdSource =
+      label && label.trim().length > 0 ? label : name ?? "";
+    return humanizeShellCommand(cmdSource);
+  }
+  // File reads.
+  if (n === "read" || n === "cat" || n === "open") {
+    return { verb: "Read file", target: label ? shortenPathish(label) : undefined };
+  }
+  // File writes / edits.
+  if (n === "write") return { verb: "Wrote file", target: label ? shortenPathish(label) : undefined };
+  if (n === "edit" || n === "patch")
+    return { verb: "Edited file", target: label ? shortenPathish(label) : undefined };
+  // Web.
+  if (n === "fetch" || n === "webfetch" || n.includes("http"))
+    return { verb: "Fetched URL", target: label ?? undefined };
+  if (n === "websearch" || n === "search" || n === "google")
+    return { verb: "Searched the web", target: label ?? undefined };
+  // MCP / generic tool — strip namespace prefixes and pretty-print the action.
+  const action = formatToolName(name);
+  return {
+    verb: `Called ${prettifyToolAction(action)}`,
+    target: label ?? undefined,
+  };
+}
+
+const SHELL_WRAPPER_RE =
+  /^(?:[/\w.-]+\/)?(?:zsh|bash|sh|dash|ksh)\s+(?:-[A-Za-z]*c|-c)\s+(['"])([\s\S]*)\1\s*$/;
+
+/**
+ * Heuristic for "this string is a shell command, not a tool identifier."
+ * Used to rescue transcript rows from before v0.4.3, where the codex
+ * parser stored the raw command's first line as the tool `name`. Those
+ * rows were rendering with the catch-all "Called …" verb, often
+ * truncated to garbage like `Called md"` after `formatToolName` split
+ * on the trailing `.md"`. Conservative — only matches recognizable
+ * shell prefixes, command separators in non-trivial strings, or
+ * leading `/usr/bin`-style binary paths. Returns false on empty / short
+ * tokens so real MCP tool names like `runScript` don't get misrouted.
+ */
+function looksLikeShellInvocation(s: string): boolean {
+  if (!s) return false;
+  const t = s.trim();
+  if (t.length < 3) return false;
+  // Standard `bash -lc "..."`-style wrappers.
+  if (/^(?:[/\w.-]+\/)?(?:zsh|bash|sh|dash|ksh)\s+(?:-[A-Za-z]*c|-c)\b/.test(t))
+    return true;
+  // Leading absolute binary path (e.g. `/usr/bin/find`, `/bin/ls`).
+  if (/^\/(?:usr\/|bin\/|opt\/|sbin\/)/.test(t)) return true;
+  // Contains shell metacharacters in a way that's incompatible with any
+  // sane tool identifier — pipes, redirects, quoted args, command
+  // chains. Combined with a length guard above this skips short
+  // identifiers but catches multi-token command lines.
+  if (/\s\|\s|\s&&\s|\s>>?\s|^["']|["']\s|\s["']/.test(t)) return true;
+  return false;
+}
+
+function unwrapShellWrapper(cmd: string): string {
+  const m = cmd.trim().match(SHELL_WRAPPER_RE);
+  if (m) return m[2]!.trim();
+  return cmd.trim();
+}
+
+function humanizeShellCommand(rawCmd: string): ToolIntent {
+  const inner = unwrapShellWrapper(rawCmd);
+  if (!inner) return { verb: "Ran shell command" };
+  // Take the leading effective command (before pipes / && / ;). Stops short
+  // of full shell parsing — good enough for the leading-verb mapping.
+  const lead = inner.split(/\s*(?:[|&;]|\|\|)\s*/)[0]!.trim();
+  const tokens = lead.split(/\s+/);
+  const head = (tokens[0] ?? "").toLowerCase();
+  const sub = tokens[1] ?? "";
+  const firstLine = inner.split("\n")[0]!;
+  const targetForExpand = firstLine.length > 80 ? `${firstLine.slice(0, 79)}…` : firstLine;
+  switch (head) {
+    case "pwd":
+      return { verb: "Checked working directory" };
+    case "ls":
+      return { verb: "Listed files", target: extractPathArg(tokens) };
+    case "find":
+      return { verb: "Searched the filesystem", target: extractPathArg(tokens) };
+    case "rg":
+    case "grep":
+    case "ag":
+    case "ack":
+      return {
+        verb: "Searched files",
+        target: extractQuotedToken(inner) ?? extractPathArg(tokens),
+      };
+    case "cat":
+    case "head":
+    case "tail":
+    case "less":
+    case "more":
+    case "bat":
+      return { verb: "Read file", target: extractPathArg(tokens) };
+    case "git": {
+      if (!sub) return { verb: "Ran git", target: targetForExpand };
+      return { verb: `Ran git ${sub}` };
+    }
+    case "npm":
+    case "pnpm":
+    case "yarn":
+    case "bun": {
+      if (sub === "test" || sub === "t") return { verb: "Ran tests" };
+      if (sub === "install" || sub === "add" || sub === "i")
+        return { verb: "Installed packages" };
+      if (sub === "run") {
+        const script = tokens[2];
+        return { verb: script ? `Ran ${head} ${script}` : `Ran ${head}` };
+      }
+      return { verb: sub ? `Ran ${head} ${sub}` : `Ran ${head}` };
+    }
+    case "node":
+    case "python":
+    case "python3":
+    case "tsx":
+    case "deno":
+    case "ts-node":
+      return { verb: "Ran script", target: extractPathArg(tokens) };
+    case "curl":
+    case "wget":
+    case "http":
+      return { verb: "Fetched URL", target: extractUrl(inner) };
+    case "mkdir":
+      return { verb: "Created directory", target: extractPathArg(tokens) };
+    case "touch":
+      return { verb: "Created file", target: extractPathArg(tokens) };
+    case "rm":
+      return { verb: "Removed file(s)", target: extractPathArg(tokens) };
+    case "mv":
+      return { verb: "Moved file" };
+    case "cp":
+      return { verb: "Copied file" };
+    case "sed":
+    case "awk":
+      return { verb: "Transformed text" };
+    case "which":
+    case "type":
+    case "whereis":
+      return { verb: "Located binary", target: tokens[1] };
+    case "echo":
+    case "printf":
+      return { verb: "Printed text" };
+    case "make":
+      return { verb: sub ? `Ran make ${sub}` : "Ran make" };
+    case "docker":
+      return { verb: sub ? `Ran docker ${sub}` : "Ran docker" };
+    case "kubectl":
+      return { verb: sub ? `Ran kubectl ${sub}` : "Ran kubectl" };
+    case "gh":
+      return { verb: sub ? `Ran gh ${sub}` : "Ran gh" };
+    case "":
+      return { verb: "Ran shell command" };
+    default:
+      return { verb: `Ran ${head}`, target: targetForExpand };
+  }
+}
+
+function extractPathArg(tokens: string[]): string | undefined {
+  // Last token that isn't a flag and isn't the leading binary.
+  for (let i = tokens.length - 1; i >= 1; i--) {
+    const t = tokens[i]!;
+    if (!t.startsWith("-") && !/^[<>|&]+$/.test(t)) {
+      return shortenPathish(t.replace(/^['"]|['"]$/g, ""));
+    }
+  }
+  return undefined;
+}
+
+function extractUrl(inner: string): string | undefined {
+  const m = inner.match(/https?:\/\/[^\s'"]+/);
+  return m?.[0];
+}
+
+function extractQuotedToken(inner: string): string | undefined {
+  const m = inner.match(/['"]([^'"\n]{1,80})['"]/);
+  if (!m) return undefined;
+  return `"${m[1]}"`;
+}
+
+function shortenPathish(p: string): string {
+  if (!p) return p;
+  // Don't compress URLs.
+  if (p.startsWith("http://") || p.startsWith("https://")) return p;
+  const segs = p.split("/").filter(Boolean);
+  if (segs.length <= 2) return p;
+  return `…/${segs.slice(-2).join("/")}`;
+}
+
+/**
+ * Map a tool action like `listAdAccounts` to a human-readable phrase
+ * (`list ad accounts`). Splits on camelCase and snake_case boundaries
+ * and lowercases — leaves single-word actions like `runScript` alone
+ * after the split. Returns the action unchanged when there's nothing
+ * to split.
+ */
+function prettifyToolAction(action: string): string {
+  if (!action) return action;
+  const withSpaces = action
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .trim();
+  if (!withSpaces) return action;
+  // Don't lowercase one-token names so single identifiers like "runScript"
+  // (already split to "run Script") read naturally as "run Script"; we
+  // only lowercase the tail to keep proper capitalization of the leading
+  // verb the model chose.
+  return withSpaces.charAt(0).toLowerCase() + withSpaces.slice(1).toLowerCase();
+}
+
+/**
+ * Walk the MCP catalog looking for a server key that matches the tool
+ * name's namespace prefix. The two harnesses use different schemes:
+ *
+ *   - **Claude Code**: `mcp__<serverKey>__<tool>`  (e.g. `mcp__NotFair-GoogleAds__createCampaign`)
+ *   - **Codex**:       `notfair_<projectSlug>__<serverNameUnderscored>__<tool>`
+ *
+ * We match by normalizing both sides to lowercase + collapsing `-` and
+ * `_` so `NotFair-GoogleAds`, `notfair_googleads`, and `notfair-googleads`
+ * all collide on the same catalog entry. Returns null when the tool
+ * name doesn't carry a recognizable MCP prefix or the prefix isn't in
+ * the catalog (e.g. an unprovisioned server, or a non-MCP built-in).
+ */
+function matchMcpServerKey(
+  toolName: string,
+  catalog: McpCatalogEntryLite[] | undefined,
+): McpCatalogEntryLite | null {
+  if (!toolName || !catalog || catalog.length === 0) return null;
+  const candidates: string[] = [];
+  // Claude Code: mcp__<serverKey>__<tool>
+  const claude = toolName.match(/^mcp__([^_].*?)__/);
+  if (claude?.[1]) candidates.push(claude[1]);
+  // Codex MCP, namespaced + tool suffix:
+  //   notfair_<projectSlug>__<serverNameUnderscored>__<tool>
+  const codexUnderscored = toolName.match(
+    /^notfair_[A-Za-z0-9_]+?__([A-Za-z0-9_]+?)__/,
+  );
+  if (codexUnderscored?.[1]) candidates.push(codexUnderscored[1]);
+  // Codex MCP via the `<server>.<tool>` shape this parser uses for
+  // `mcp_tool_call` items. The server is the FULL namespaced config key
+  // (e.g. `notfair_demo__notfair_googleads`), so peel the leading
+  // `notfair_<projectSlug>__` prefix off too — the catalog stores the
+  // bare server key.
+  const dot = toolName.match(/^([A-Za-z0-9_-]+)\./);
+  if (dot?.[1]) {
+    candidates.push(dot[1]);
+    const tail = dot[1].match(/^notfair_[A-Za-z0-9_]+?__(.+)$/);
+    if (tail?.[1]) candidates.push(tail[1]);
+  }
+  if (candidates.length === 0) return null;
+  const norm = (s: string) => s.toLowerCase().replace(/[-_]/g, "");
+  for (const cand of candidates) {
+    const target = norm(cand);
+    const hit = catalog.find((c) => norm(c.key) === target);
+    if (hit) return hit;
+  }
+  return null;
 }
 
 function ErrorRow({

@@ -130,9 +130,12 @@ describe("LiveTranscript rendering events", () => {
     render(<LiveTranscript {...defaultProps({ initialEvents: events, threadId: "t-render" })} />);
     expect(screen.getByText("hello there")).toBeInTheDocument();
     expect(screen.getByTestId("markdown")).toHaveTextContent("hi back");
-    // Tool name "read" appears both in the group headline and in the per-row.
-    expect(screen.getAllByText("read").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("/etc/passwd").length).toBeGreaterThanOrEqual(1);
+    // Tool group now leads with the humanized intent ("Read file") in
+    // both summary and expanded row; raw tool identifier ("read") is
+    // tucked into a small mono tag on the row, and the label path
+    // surfaces as the target detail.
+    expect(screen.getAllByText("Read file").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/\/etc\/passwd/).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/ok output/)).toBeInTheDocument();
     expect(screen.getByText(/→ result/)).toBeInTheDocument();
   });
@@ -169,6 +172,128 @@ describe("LiveTranscript rendering events", () => {
     render(<LiveTranscript {...defaultProps({ initialEvents: events, threadId: "t-err" })} />);
     expect(screen.getByText(/→ error/)).toBeInTheDocument();
     expect(screen.getByText("boom")).toBeInTheDocument();
+  });
+
+  it("humanizes a wrapped shell command into a verb phrase (rg → Searched files)", () => {
+    const events: TranscriptEvent[] = [
+      {
+        kind: "tool_call",
+        id: "t1",
+        ts: 1,
+        tool_call_id: "call-rg",
+        name: "shell",
+        label: `/bin/zsh -lc "rg --files -g '!*node_modules*' | head -200"`,
+      },
+    ];
+    render(<LiveTranscript {...defaultProps({ initialEvents: events, threadId: "t-shell-rg" })} />);
+    expect(screen.getAllByText("Searched files").length).toBeGreaterThanOrEqual(1);
+    // Raw command remains accessible in the expanded body.
+    expect(screen.getAllByText(/rg --files/).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("humanizes legacy transcript rows where the raw command was stored as the tool name", () => {
+    // Pre-0.4.3 codex events landed in SQLite with `name` = first line of
+    // the shell command. The new humanizer should sniff the shell wrapper
+    // out of the name when the label is missing/duplicated and surface
+    // the intent verb instead of "Called md\"".
+    const events: TranscriptEvent[] = [
+      {
+        kind: "tool_call",
+        id: "t1",
+        ts: 1,
+        tool_call_id: "call-legacy",
+        name: `/bin/zsh -lc "sed -n '1,220p' notfair-meta.json && sed -n '1,260p' IDENTITY.md"`,
+        label: `/bin/zsh -lc "sed -n '1,220p' notfair-meta.json && sed -n '1,260p' IDENTITY.md"`,
+      },
+    ];
+    render(<LiveTranscript {...defaultProps({ initialEvents: events, threadId: "t-legacy-shell" })} />);
+    expect(screen.queryByText(/Called md/)).not.toBeInTheDocument();
+    expect(screen.getAllByText("Transformed text").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("humanizes a git subcommand from a wrapped shell line", () => {
+    const events: TranscriptEvent[] = [
+      {
+        kind: "tool_call",
+        id: "t1",
+        ts: 1,
+        tool_call_id: "call-git",
+        name: "shell",
+        label: `/bin/zsh -lc "git status --porcelain"`,
+      },
+    ];
+    render(<LiveTranscript {...defaultProps({ initialEvents: events, threadId: "t-shell-git" })} />);
+    expect(screen.getAllByText("Ran git status").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("matches an MCP catalog entry via codex's <namespaced-server>.<tool> name shape", () => {
+    // Codex 0.132+ ships MCP invocations as `<configKey>.<tool>` where
+    // configKey is the namespaced TOML section name we registered
+    // (`notfair_<projectSlug>__<serverNameUnderscored>`). The favicon
+    // matcher needs to peel that wrapper off so the bare server key
+    // hits the catalog.
+    const events: TranscriptEvent[] = [
+      {
+        kind: "tool_call",
+        id: "t1",
+        ts: 1,
+        tool_call_id: "call-mcp-codex",
+        name: "notfair_demo__notfair_googleads.listAdAccounts",
+        label: "active campaigns",
+      },
+    ];
+    render(
+      <LiveTranscript
+        {...defaultProps({
+          initialEvents: events,
+          threadId: "t-mcp-codex",
+          mcpCatalog: [
+            {
+              key: "notfair-googleads",
+              display_name: "NotFair Google Ads",
+              resource_url: "https://notfair.co/api/mcp/google_ads",
+            },
+          ],
+        })}
+      />,
+    );
+    const imgs = screen.getAllByRole("img", { name: /NotFair Google Ads/ });
+    expect(imgs.length).toBeGreaterThanOrEqual(1);
+    expect(imgs[0]!.getAttribute("src")).toMatch(/notfair\.co/);
+  });
+
+  it("renders an MCP brand favicon when a tool name matches a catalog entry", () => {
+    const events: TranscriptEvent[] = [
+      {
+        kind: "tool_call",
+        id: "t1",
+        ts: 1,
+        tool_call_id: "call-mcp",
+        name: "mcp__notfair-googleads__listAdAccounts",
+        label: "active campaigns",
+      },
+    ];
+    render(
+      <LiveTranscript
+        {...defaultProps({
+          initialEvents: events,
+          threadId: "t-mcp-icon",
+          mcpCatalog: [
+            {
+              key: "notfair-googleads",
+              display_name: "NotFair Google Ads",
+              resource_url: "https://notfair.co/api/mcp/google_ads",
+            },
+          ],
+        })}
+      />,
+    );
+    // Favicon img comes from the catalog entry's brand domain (notfair.co).
+    const imgs = screen.getAllByRole("img", { name: /NotFair Google Ads/ });
+    expect(imgs.length).toBeGreaterThanOrEqual(1);
+    expect(imgs[0]!.getAttribute("src")).toMatch(/notfair\.co/);
+    // Humanized action verb.
+    expect(screen.getAllByText(/list ad accounts/i).length).toBeGreaterThanOrEqual(1);
   });
 
   it("groups multiple consecutive tool calls into a single tool group with step count", () => {
@@ -492,9 +617,12 @@ describe("LiveTranscript /api/chat send path", () => {
     fireEvent.change(textarea, { target: { value: "ls" } });
     fireEvent.submit(textarea.closest("form")!);
     await waitFor(() => {
-      expect(screen.getAllByText("shell").length).toBeGreaterThanOrEqual(1);
-      expect(screen.getAllByText("ls").length).toBeGreaterThanOrEqual(1);
+      // Streamed tool starts now render with the humanized intent —
+      // "ls" is recognized as a `Listed files` invocation.
+      expect(screen.getAllByText("Listed files").length).toBeGreaterThanOrEqual(1);
     });
+    // Raw "shell" identifier shows as a small mono tag on the expanded row.
+    expect(screen.getAllByText("shell").length).toBeGreaterThanOrEqual(1);
     // Wrap up the stream so the send promise finishes before unmount.
     controllerRef!.close();
   });

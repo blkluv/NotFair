@@ -8,6 +8,7 @@ import {
 } from "@/server/sessions/view";
 import { classifySessions } from "@/server/sessions/view";
 import { getMcpStatus } from "@/server/mcp/state";
+import { getMcpCatalog } from "@/server/mcp-catalog";
 import { readTranscriptTail } from "@/server/sessions/transcript-tail";
 import { LiveTranscript } from "@/components/live-transcript";
 import { GoogleAdsMcpBanner } from "@/components/google-ads-mcp-banner";
@@ -87,6 +88,16 @@ export default async function AgentChatThreadPage({
   // from the old onboarding audit is gone now that audit IS a task.
   const autoKickoff = false;
 
+  // MCP catalog — pass through the minimum shape the chat needs to
+  // render an MCP server's brand favicon next to its tool calls.
+  // Mapping is by server key, so the resource_url is the brand domain
+  // we feed faviconV2.
+  const mcpCatalog = getMcpCatalog(project.slug).map((m) => ({
+    key: m.key,
+    display_name: m.display_name,
+    resource_url: m.resource_url,
+  }));
+
   return (
     <div className="flex h-full flex-col">
       <McpFlashBanner connected={mcp_connected} error={mcp_error} />
@@ -123,6 +134,7 @@ export default async function AgentChatThreadPage({
           initialEvents={initialEvents}
           initialByteOffset={initialByteOffset}
           autoKickoff={autoKickoff}
+          mcpCatalog={mcpCatalog}
         />
       </div>
     </div>

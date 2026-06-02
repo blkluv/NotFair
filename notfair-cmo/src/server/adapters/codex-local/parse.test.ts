@@ -34,13 +34,95 @@ describe("parseCodexLine", () => {
       }),
       state,
     );
+    // Shell command items get a stable `"shell"` name so the chat UI can
+    // route them to the Terminal icon + humanize the intent from the
+    // command line. The raw command stays in `label`.
     expect(out).toEqual([
       {
         kind: "tool",
         phase: "start",
         toolCallId: "cmd_1",
-        name: "ls -la",
+        name: "shell",
         label: "ls -la",
+      },
+    ]);
+  });
+
+  it("emits a tool start event for an mcp_tool_call item using <server>.<tool> naming", () => {
+    // Codex 0.132+ surfaces MCP invocations as their own item type with
+    // distinct `server` + `tool` fields. The UI matches tool calls to
+    // catalog entries via a `<server>.<tool>` shape, so the parser
+    // normalizes to that.
+    const state = makeCodexStreamState();
+    const out = parseCodexLine(
+      JSON.stringify({
+        type: "item.started",
+        item: {
+          type: "mcp_tool_call",
+          id: "mcp_1",
+          server: "notfair_demo__notfair_googleads",
+          tool: "listAdAccounts",
+          arguments: { query: "active campaigns" },
+        },
+      }),
+      state,
+    );
+    expect(out).toEqual([
+      {
+        kind: "tool",
+        phase: "start",
+        toolCallId: "mcp_1",
+        name: "notfair_demo__notfair_googleads.listAdAccounts",
+        label: "active campaigns",
+      },
+    ]);
+  });
+
+  it("emits a tool result event when an mcp_tool_call completes", () => {
+    const state = makeCodexStreamState();
+    const out = parseCodexLine(
+      JSON.stringify({
+        type: "item.completed",
+        item: {
+          type: "mcp_tool_call",
+          id: "mcp_1",
+          server: "notfair_demo__notfair_googleads",
+          tool: "listAdAccounts",
+        },
+      }),
+      state,
+    );
+    expect(out).toEqual([
+      {
+        kind: "tool",
+        phase: "result",
+        toolCallId: "mcp_1",
+        name: "notfair_demo__notfair_googleads.listAdAccounts",
+      },
+    ]);
+  });
+
+  it("keeps the declared name when item.name is provided (real MCP tool call)", () => {
+    const state = makeCodexStreamState();
+    const out = parseCodexLine(
+      JSON.stringify({
+        type: "item.started",
+        item: {
+          type: "tool_call",
+          id: "tc_1",
+          name: "notfair_demo__notfair_googleads__listAdAccounts",
+          arguments: { query: "active campaigns" },
+        },
+      }),
+      state,
+    );
+    expect(out).toEqual([
+      {
+        kind: "tool",
+        phase: "start",
+        toolCallId: "tc_1",
+        name: "notfair_demo__notfair_googleads__listAdAccounts",
+        label: "active campaigns",
       },
     ]);
   });
