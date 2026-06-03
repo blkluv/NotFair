@@ -24,8 +24,11 @@ export default async function ConnectionsPage({
   if (!project || project.archived_at) notFound();
 
   const catalog = getMcpCatalog(project.slug);
-  // Status probes happen in parallel — each has its own 2s timeout so a
-  // flaky upstream doesn't gate the whole page.
+  // Status probes happen in parallel — each goes through the in-process
+  // probe cache (60s for connected, 10s for unreachable), so a hot reload
+  // resolves almost entirely from memory. First-visit cost is bounded by
+  // the per-probe timeout in `getMcpStatus` (6s) since Promise.all waits
+  // for the slowest probe.
   const statuses = await Promise.all(
     catalog.map((s) => getMcpStatus(project.slug, s.key)),
   );

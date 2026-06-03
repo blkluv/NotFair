@@ -75,6 +75,13 @@ async function probe(
   // Goes through `mcpRpcAutoRefresh` so an expired access token gets
   // silently swapped for a fresh one instead of flapping the status to
   // "stale_token" on every page load.
+  //
+  // 6s budget: an OAuth-validated `initialize` across the public internet
+  // typically lands in 0.3–1.5s, but cold serverless starts, SSE buffering
+  // (the parser drains the full body before extracting the JSON-RPC frame),
+  // and an upstream introspection RTT can stack. 2s was too tight and made
+  // healthy connectors flap to "unreachable: timed out". 6s still bounds
+  // page render at ~6s worst-case via Promise.all in the page component.
   const r = await mcpRpcAutoRefresh<unknown>(
     project_slug,
     catalog_key,
@@ -84,7 +91,7 @@ async function probe(
       capabilities: {},
       clientInfo: { name: "notfair-cmo", version: "0.3.1" },
     },
-    { timeoutMs: 2000 },
+    { timeoutMs: 6000 },
   );
   if (r.ok) {
     return {
