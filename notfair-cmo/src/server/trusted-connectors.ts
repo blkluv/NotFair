@@ -48,6 +48,12 @@ export const TRUSTED_CONNECTORS: TrustedConnector[] = [
     resource_url: "https://notfair.co/api/mcp/meta_ads",
   },
   {
+    id: "notfair-googlesearchconsole",
+    display_name: "NotFair Google Search Console",
+    description: "Organic search performance, queries, pages, indexing.",
+    resource_url: "https://notfair.co/api/mcp/google_search_console",
+  },
+  {
     id: "stripe",
     display_name: "Stripe",
     description: "Payments, customers, subscriptions, invoices.",
