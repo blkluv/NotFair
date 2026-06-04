@@ -11,6 +11,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.25.6] — 2026-06-04
+
+### Added
+
+- Wired the NotFair Google Search Console MCP server (`https://notfair.co/api/mcp/google_search_console`) into the plugin's `.mcp.json`, exposing it as `NotFair-SearchConsole`. The hosted endpoint and the SEO connector were already live, but the plugin never registered the server, so its tools (search analytics, URL inspection, sitemaps) were unavailable in Claude Code alongside the existing Google Ads and Meta Ads servers.
+
+---
+
 ## [0.25.5] — 2026-05-28
 
 ### Added

@@ -7,6 +7,10 @@
     "NotFair-MetaAds": {
       "type": "http",
       "url": "https://notfair.co/api/mcp/meta_ads"
+    },
+    "NotFair-SearchConsole": {
+      "type": "http",
+      "url": "https://notfair.co/api/mcp/google_search_console"
     }
   }
 }
