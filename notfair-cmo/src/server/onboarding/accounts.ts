@@ -289,7 +289,7 @@ export async function getProvisioningProgressAction(
     ok: true,
     steps: [
       { key: "cmo", label: "Setting up CMO", status: "done" },
-      { key: "google_ads", label: "Setting up Google Ads specialist", status: "done" },
+      { key: "google_ads", label: "Setting up Google Ads Specialist", status: "done" },
       { key: "gateway", label: "Connecting agents to gateway", status: "done" },
     ],
     overall: "done",

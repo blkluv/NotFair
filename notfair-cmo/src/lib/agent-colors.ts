@@ -25,6 +25,11 @@ const PALETTE: Record<AgentTemplateKey, AgentColor> = {
     dot: "bg-amber-500",
     label: "text-amber-700 dark:text-amber-300",
   },
+  meta_ads: {
+    chip: "bg-pink-100 text-pink-900 dark:bg-pink-950 dark:text-pink-100 border-pink-200/60 dark:border-pink-900",
+    dot: "bg-pink-500",
+    label: "text-pink-700 dark:text-pink-300",
+  },
   seo: {
     chip: "bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-100 border-emerald-200/60 dark:border-emerald-900",
     dot: "bg-emerald-500",

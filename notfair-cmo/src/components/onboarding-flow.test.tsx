@@ -399,7 +399,7 @@ describe("OnboardingFlow — SetupStep", () => {
         { key: "cmo", label: "Setting up CMO", status: "in_progress" },
         {
           key: "google_ads",
-          label: "Setting up Google Ads specialist",
+          label: "Setting up Google Ads Specialist",
           status: "pending",
         },
         {
@@ -414,7 +414,7 @@ describe("OnboardingFlow — SetupStep", () => {
     expect(
       await screen.findByText(/Setting up CMO/i),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Setting up Google Ads specialist/i)).toBeInTheDocument();
+    expect(screen.getByText(/Setting up Google Ads Specialist/i)).toBeInTheDocument();
     expect(screen.getByText(/Connecting agents to gateway/i)).toBeInTheDocument();
     expect(routerReplace).not.toHaveBeenCalled();
   });
@@ -427,7 +427,7 @@ describe("OnboardingFlow — SetupStep", () => {
         { key: "cmo", label: "Setting up CMO", status: "done" },
         {
           key: "google_ads",
-          label: "Setting up Google Ads specialist",
+          label: "Setting up Google Ads Specialist",
           status: "done",
         },
         {
@@ -464,7 +464,7 @@ describe("OnboardingFlow — SetupStep", () => {
         },
         {
           key: "google_ads",
-          label: "Setting up Google Ads specialist",
+          label: "Setting up Google Ads Specialist",
           status: "pending",
         },
         {

@@ -2,7 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bot, Briefcase, Megaphone, Search, type LucideIcon } from "lucide-react";
+import {
+  Bot,
+  Briefcase,
+  Megaphone,
+  MessageCircle,
+  Search,
+  type LucideIcon,
+} from "lucide-react";
 import {
   SidebarMenu,
   SidebarMenuButton,
@@ -44,6 +51,7 @@ type Props = {
 const TEMPLATE_ICONS: Record<AgentTemplateKey, LucideIcon> = {
   cmo: Briefcase,
   google_ads: Megaphone,
+  meta_ads: MessageCircle,
   seo: Search,
 };
 
@@ -78,7 +86,7 @@ export function AgentNav({ projectSlug, agents, inFlightCounts = {} }: Props) {
                 {a.role_label && rolePalette && (
                   <span
                     className={cn(
-                      "ml-1 rounded-sm border px-1 py-px text-[9px] font-medium uppercase tracking-wider leading-none",
+                      "ml-1 rounded-sm border px-1.5 py-[1px] text-[10px] font-medium leading-none",
                       rolePalette.chip,
                     )}
                   >

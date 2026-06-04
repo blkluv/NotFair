@@ -205,7 +205,7 @@ ${CMO_ROLE}`,
   },
   {
     key: "google_ads",
-    display_name: "Google Ads",
+    display_name: "Google Ads Specialist",
     default_name: "Ana",
     description: "Runs Google Ads campaigns, keywords, bids, budgets, search terms, negatives.",
     capabilities: [
@@ -235,7 +235,7 @@ for files in your workspace, and the orchestration MCP for coordination.`,
   },
   {
     key: "meta_ads",
-    display_name: "Meta Ads",
+    display_name: "Meta Ads Specialist",
     default_name: "Mia",
     description: "Runs Meta Ads (Facebook + Instagram) campaigns, ad sets, creative, audiences.",
     capabilities: [
@@ -277,7 +277,7 @@ for files in your workspace, and the orchestration MCP for coordination.`,
   },
   {
     key: "seo",
-    display_name: "SEO",
+    display_name: "SEO Specialist",
     default_name: "Sam",
     description:
       "Organic search — Search Console performance, technical SEO, content recommendations.",
@@ -448,7 +448,9 @@ export async function ensureProjectAgents(
   // checklist instead of a single opaque spinner.
   const progressSteps: ProgressStep[] = templates.map<ProgressStep>((t) => ({
     key: t.key,
-    label: `Setting up ${t.display_name}${t.key === "cmo" ? "" : " specialist"}`,
+    // display_name carries the full role label now (e.g. "Google Ads
+    // Specialist"), so no suffix kludge.
+    label: `Setting up ${t.display_name}`,
     status: "pending",
   }));
   initProgress(project_slug, progressSteps);

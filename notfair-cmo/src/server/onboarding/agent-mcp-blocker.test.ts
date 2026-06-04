@@ -50,7 +50,7 @@ describe("resolveAgentMcpBlocker", () => {
     expect(result).toEqual({
       mcp_key: "notfair-googleads",
       mcp_display_name: "NotFair Google Ads",
-      agent_display_name: "Google Ads",
+      agent_display_name: "Google Ads Specialist",
     });
     expect(findMcpTokenMock).toHaveBeenCalledWith("acme", "notfair-googleads");
   });
@@ -61,7 +61,7 @@ describe("resolveAgentMcpBlocker", () => {
     expect(result).toEqual({
       mcp_key: "notfair-metaads",
       mcp_display_name: "NotFair Meta Ads",
-      agent_display_name: "Meta Ads",
+      agent_display_name: "Meta Ads Specialist",
     });
   });
 
@@ -79,6 +79,6 @@ describe("resolveAgentMcpBlocker", () => {
     getMcpCatalogMock.mockReturnValueOnce([]); // empty catalog this call
     findMcpTokenMock.mockReturnValue(null);
     const result = resolveAgentMcpBlocker("acme", "google_ads");
-    expect(result?.mcp_display_name).toBe("Google Ads");
+    expect(result?.mcp_display_name).toBe("Google Ads Specialist");
   });
 });
