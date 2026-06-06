@@ -1,5 +1,11 @@
 # notfair-cmo
 
+## 0.7.1 — 2026-06-06
+
+**Sidebar shows the installed version + a one-click Upgrade button.** The sidebar footer now always displays `notfair-cmo v<x.y.z>`. When the npm registry has a newer release, an `v<x.y.z> available` button appears next to it — click runs `npm i -g notfair-cmo@latest` via a new `/api/upgrade` endpoint and surfaces "Restart to apply" on success. Latest-version lookup is cached 1 hour in-process so the sidebar polling doesn't pound `registry.npmjs.org`.
+
+When `npm` isn't discoverable on the user's PATH (rare but real on minimal shells), `/api/upgrade` returns the command string instead and the client copies `npm i -g notfair-cmo@latest` to the clipboard so the user can run it themselves.
+
 ## 0.7.0 — 2026-06-06
 
 **Browser tools split into their own standalone MCP server.** The 11 `browser_*` tools moved out of `notfair-orchestration` into a new `notfair-browser` MCP at `/api/mcp/browser`. The orchestration surface drops from 32 tools to 21 (task / approval / project / cron only); each MCP server now has one clear job. Codex / Claude Code configs gain a second internal entry automatically on next project visit — no manual reconfig.
