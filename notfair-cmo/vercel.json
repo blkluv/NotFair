@@ -10,7 +10,6 @@
       "use": "@vercel/next"
     }
   ],
-  "installCommand": "pnpm install --frozen-lockfile",
-  "buildCommand": "pnpm run build",
+  "buildCommand": "pnpm run vercel-build",
   "outputDirectory": ".next/standalone"
 }
