@@ -1,0 +1,27 @@
+# Exclude symlinked directories
+node_modules/.bin
+node_modules/.cache
+**/node_modules/.bin
+**/node_modules/.cache
+
+# Exclude development files
+*.test.ts
+*.test.js
+*.spec.ts
+*.spec.js
+__tests__
+tests
+coverage
+.nyc_output
+
+# Exclude logs and temp files
+*.log
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+
+# Exclude Git files
+.git
+.gitignore
+.gitattributes
