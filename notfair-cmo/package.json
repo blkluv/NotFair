@@ -1,7 +1,7 @@
 {
   "name": "notfair-cmo",
   "version": "0.7.1",
-  "description": "Open-source AI marketing CMO portal. Run locally; orchestrates marketing agents (Google Ads, SEO, and more) on top of Claude Code, Codex, or other local AI coding agents.",
+  "description": "Open-source AI marketing CMO portal.",
   "license": "MIT",
   "bin": {
     "notfair-cmo": "bin/cli.mjs"
@@ -23,7 +23,8 @@
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
-    "eval": "vitest run --config vitest.evals.config.ts"
+    "eval": "vitest run --config vitest.evals.config.ts",
+    "vercel-build": "node scripts/fix-vercel-build.js"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^1.0.0",
@@ -34,12 +35,10 @@
     "@radix-ui/react-slot": "^1.1.0",
     "@swc/helpers": "^0.5.21",
     "ai": "^4.0.0",
-    "better-sqlite3": "^12.10.0",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.0",
     "commander": "^12.1.0",
     "cron-parser": "^5.5.0",
-    "keytar": "^7.9.0",
     "lucide-react": "^0.460.0",
     "next": "^16.2.6",
     "next-themes": "^0.4.6",
@@ -67,9 +66,11 @@
     "@vitejs/plugin-react": "^6.0.2",
     "@vitest/coverage-v8": "^4.1.7",
     "@vitest/ui": "^4.1.6",
+    "better-sqlite3": "^12.10.0",
     "eslint": "^9.0.0",
     "eslint-config-next": "^16.2.6",
     "jsdom": "^29.1.1",
+    "keytar": "^7.9.0",
     "postcss": "^8.4.0",
     "tailwindcss": "^4.0.0",
     "tsx": "^4.19.0",
