@@ -88,11 +88,5 @@
       "unrs-resolver",
       "node-pty"
     ]
-  },
-  "os": [
-    "darwin"
-  ],
-  "cpu": [
-    "arm64"
-  ]
+  }
 }
